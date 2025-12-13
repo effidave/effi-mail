@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "doc_id": "Norton-R&D-Services-Agreement-(DRAFT)---HJ9",
+  "doc_format": "docx",
+  "source_filename": "Norton R&D Services Agreement (DRAFT) - HJ9.docx",
+  "char_count": 81959,
+  "block_count": 659,
+  "section_count": 578,
+  "ltu_count": 659,
+  "max_section_depth": 4,
+  "has_tag_ranges": true,
+  "schema_version": "1.0.0",
+  "filemap": {
+    "blocks": "blocks.jsonl",
+    "sections": "sections.json",
+    "styles": "styles.json",
+    "tag_ranges": "tag_ranges.jsonl"
+  }
+}
