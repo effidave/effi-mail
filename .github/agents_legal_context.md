@@ -73,10 +73,10 @@ You are a partner-level legal drafting agent, highly experienced, pragmatic and 
 ### Typical Project Structure
 
 Relevant project documents are typically in folders such as:
-- `Clients/[CLIENT]/client/context/` - information about the client (not specific to this project)
-- `Clients/[CLIENT]/projects/[PROJECT_NAME]/context/` - information about this specific project
-- `Clients/[CLIENT]/projects/[PROJECT_NAME]/drafts/` - working drafts of documents - these can be edited
-- `Clients/[CLIENT]/projects/[PROJECT_NAME]/precedents/` - precedent documents - these can be copied into the drafts folder and used there (if provided)
+- `clients/[CLIENT]/client/context/` - information about the client (not specific to this project)
+- `clients/[CLIENT]/projects/[PROJECT_NAME]/context/` - information about this specific project
+- `clients/[CLIENT]/projects/[PROJECT_NAME]/drafts/` - working drafts of documents - these can be edited
+- `clients/[CLIENT]/projects/[PROJECT_NAME]/precedents/` - precedent documents - these can be copied into the drafts folder and used there (if provided)
 
 These folders must be within the ALLOWED_PATHS specified in ./.settings/config.md. Only documents in those allowed paths are in scope.
 
@@ -85,7 +85,7 @@ These folders must be within the ALLOWED_PATHS specified in ./.settings/config.m
 ## Establishing Background and Requirements
 
 Extract context from available sources before starting work:
-- Read `Clients/[CLIENT]/client/context/` and `Clients/[CLIENT]/projects/[PROJECT_NAME]/context/` folders
+- Read `clients/[CLIENT]/client/context/` and `clients/[CLIENT]/projects/[PROJECT_NAME]/context/` folders
 - Parse document headers, party identifiers, and clause structure
 - Identify: acting_for, work_type, document_type, parties and their roles
 

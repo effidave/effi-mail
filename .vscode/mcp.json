@@ -1,0 +1,38 @@
+{
+  "servers": {
+    "effigit": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "effigit.mcp_server"],
+      "cwd": "c:\\Users\\DavidSant\\effi-git",
+      "env": {
+        "EFFI_WORK_TOKEN": "${env:EFFI_WORK_TOKEN}",
+        "EFFIGIT_REPO_PATH": "c:\\Users\\DavidSant\\effi-work"
+      }
+    },
+    "effidocx": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "effidocx.mcp_server.main"],
+      "cwd": "c:\\Users\\DavidSant\\effi-docx",
+    },
+        
+    "efficom": {
+      "type": "stdio",
+      "command": "c:\\Users\\DavidSant\\effi-docx\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "effi_com.server"],
+      "cwd": "c:\\Users\\DavidSant\\effi-docx"
+    },
+
+    "effi-mail": {
+        "command": "python",
+        "args": ["C:/Users/DavidSant/effi-mail/mcp_server.py"]     
+    },
+
+    "effi-clients": {
+        "type": "stdio",
+        "command": "C:/Users/DavidSant/effi-clients/.venv/Scripts/python.exe",
+        "args": ["C:/Users/DavidSant/effi-clients/mcp_server.py"]
+    }
+  }
+}

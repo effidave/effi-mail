@@ -67,7 +67,7 @@ effigit.update_task(
 effigit.update_task(
     repo_path="c:\Users\DavidSant\effi-work",
     issue=5,
-    document="Clients/Percayso/projects/PDX/drafts/PDX Lender Agreement.docx"
+    document="clients/Percayso/projects/PDX/drafts/PDX Lender Agreement.docx"
 )
 ```
 
@@ -115,7 +115,7 @@ If an `@effi` marker in a GitHub comment does not have an associated UUID, there
 ### Wrong Approaches (breaks autonomy)
 - DON'T: "Shall I proceed to check for pending work?" → Just use `effigit.get_all_mentions()`
 - DON'T: "Let me fetch the full issue with gh CLI" → Use `effigit.show_task(issue=N)`  
-- DON'T: "Let me scan directories to find context files" → Use targeted `read_file("Clients/[CLIENT]/client/context/background.md")`
+- DON'T: "Let me scan directories to find context files" → Use targeted `read_file("clients/[CLIENT]/client/context/background.md")`
 - DON'T: "May I use Get-ChildItem -Recurse?" → NO. Ask "What is the path to the context file I should read?"
 
 ### Right Approaches (autonomous within constraints)
@@ -201,7 +201,7 @@ comments = effigit.get_issue_comments(repo_path="c:\Users\DavidSant\effi-work", 
 location = effigit.locate_mention(repo_path="c:\Users\DavidSant\effi-work", uuid="abc123")
 
 # If you need to read context files, use targeted reads:
-context = read_file("Clients/[CLIENT]/projects/[PROJECT]/context/background.md")
+context = read_file("clients/[CLIENT]/projects/[PROJECT]/context/background.md")
 
 # Execute the work (edit docx files)...
 

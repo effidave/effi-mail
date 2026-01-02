@@ -69,8 +69,8 @@ When delegated complex drafting by the LegalDirector:
 ### 1. Establish Context
 
 Read and understand:
-- Client context files (`Clients/[CLIENT]/client/context/`)
-- Project context (`Clients/[CLIENT]/projects/[PROJECT]/context/`)
+- Client context files (`clients/[CLIENT]/client/context/`)
+- Project context (`clients/[CLIENT]/projects/[PROJECT]/context/`)
 - The document to be edited
 - Any related documents or precedents
 

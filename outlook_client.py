@@ -2,15 +2,19 @@
 
 import win32com.client
 from datetime import datetime, timedelta
-from typing import List, Optional, Generator
+from typing import List, Optional, Generator, Dict, Any
 import pythoncom
+import os
+import mimetypes
 
-from models import Email, Domain, EmailCategory
-from database import Database
+from models import Email, Domain, EmailCategory, TriageStatus
 
 
 class OutlookClient:
-    """Windows COM client for Outlook email access."""
+    """Windows COM client for Outlook email access.
+    
+    No database dependency - triage status is stored in Outlook categories.
+    """
     
     # Outlook folder constants
     FOLDER_INBOX = 6
@@ -18,8 +22,10 @@ class OutlookClient:
     FOLDER_DRAFTS = 16
     FOLDER_DELETED = 3
     
-    def __init__(self, db: Optional[Database] = None):
-        self.db = db or Database()
+    # MAPI property for PR_INTERNET_MESSAGE_ID
+    PR_INTERNET_MESSAGE_ID = "http://schemas.microsoft.com/mapi/proptag/0x1035001F"
+    
+    def __init__(self):
         self._outlook = None
         self._namespace = None
     
@@ -57,7 +63,36 @@ class OutlookClient:
             return email.split("@")[-1].lower()
         return "(no domain)"
     
-    def _message_to_email(self, message, folder_path: str = "Inbox") -> Optional[Email]:
+    def _get_internet_message_id(self, message) -> Optional[str]:
+        """Extract the permanent Internet Message-ID (RFC2822 header) from a message.
+        
+        This ID persists across folder moves and mailbox migrations, unlike EntryID.
+        """
+        try:
+            return message.PropertyAccessor.GetProperty(self.PR_INTERNET_MESSAGE_ID)
+        except:
+            return None
+    
+    def _compute_recipient_domains(self, recipients_to: List[str], recipients_cc: List[str]) -> str:
+        """Compute unique recipient domains from To and CC lists.
+        
+        Args:
+            recipients_to: List of To recipient email addresses
+            recipients_cc: List of CC recipient email addresses
+            
+        Returns:
+            Comma-separated string of unique domains
+        """
+        domains = set()
+        for email in recipients_to + recipients_cc:
+            if email and "@" in email:
+                domain = email.split("@")[-1].lower()
+                if domain:
+                    domains.add(domain)
+        return ",".join(sorted(domains))
+    
+    def _message_to_email(self, message, folder_path: str = "Inbox", direction: str = "inbound", 
+                           recipient_domain: str = None) -> Optional[Email]:
         """Convert Outlook message to Email object."""
         try:
             sender_email = self._get_sender_email(message)
@@ -65,15 +100,49 @@ class OutlookClient:
             if hasattr(received, 'replace'):
                 received = received.replace(tzinfo=None)
             
-            # Get attachments
+            # Get attachments - filter out inline images (email signatures)
             attachments = []
             has_attachments = message.Attachments.Count > 0
             if has_attachments:
-                for i in range(1, min(message.Attachments.Count + 1, 11)):  # Max 10 attachment names
+                for i in range(1, message.Attachments.Count + 1):
                     try:
-                        attachments.append(message.Attachments.Item(i).FileName)
+                        att = message.Attachments.Item(i)
+                        filename = att.FileName
+                        lower_name = filename.lower()
+                        
+                        # Document file extensions are ALWAYS real attachments
+                        doc_extensions = ('.docx', '.doc', '.pdf', '.xlsx', '.xls', 
+                                         '.pptx', '.ppt', '.zip', '.rar', '.csv', '.txt')
+                        is_document = lower_name.endswith(doc_extensions)
+                        
+                        if is_document:
+                            attachments.append(filename)
+                        else:
+                            # For images, check if they're inline (signature images)
+                            is_image = lower_name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))
+                            
+                            if is_image:
+                                # Check for ContentID (inline images have this)
+                                try:
+                                    content_id = att.PropertyAccessor.GetProperty(
+                                        "http://schemas.microsoft.com/mapi/proptag/0x3712001F"
+                                    )
+                                    has_content_id = bool(content_id)
+                                except:
+                                    has_content_id = False
+                                
+                                # Skip if inline OR matches signature pattern (image001.png etc)
+                                is_inline = has_content_id or lower_name.startswith('image')
+                                if is_inline:
+                                    continue  # Skip this attachment
+                            
+                            # Keep non-inline attachments
+                            attachments.append(filename)
                     except:
                         pass
+            
+            # Limit to 20 attachments max
+            attachments = attachments[:20]
             
             # Get body preview (first 500 chars)
             body_preview = ""
@@ -83,32 +152,92 @@ class OutlookClient:
             except:
                 pass
             
+            # For outbound emails, use recipient domain instead of sender domain
+            domain = recipient_domain if recipient_domain else self._extract_domain(sender_email)
+            
+            # Set triage status based on direction - sent emails are auto-processed
+            triage_status = TriageStatus.PROCESSED if direction == "outbound" else TriageStatus.PENDING
+            
+            # Extract recipients (To and CC)
+            recipients_to = self._extract_recipients(message, "To")
+            recipients_cc = self._extract_recipients(message, "CC")
+            
+            # Compute recipient domains at sync time
+            recipient_domains = self._compute_recipient_domains(recipients_to, recipients_cc)
+            
+            # Extract permanent message ID
+            internet_message_id = self._get_internet_message_id(message)
+            
             return Email(
                 id=message.EntryID,
                 subject=message.Subject or "(No Subject)",
                 sender_name=message.SenderName or "",
                 sender_email=sender_email,
-                domain=self._extract_domain(sender_email),
+                domain=domain,
                 received_time=received,
                 body_preview=body_preview,
                 has_attachments=has_attachments,
                 attachment_names=attachments,
                 categories=message.Categories or "",
                 conversation_id=getattr(message, 'ConversationID', None),
-                folder_path=folder_path
+                folder_path=folder_path,
+                direction=direction,
+                recipients_to=recipients_to,
+                recipients_cc=recipients_cc,
+                recipient_domains=recipient_domains,
+                internet_message_id=internet_message_id,
+                triage_status=triage_status,
             )
         except Exception as e:
             return None
     
+    def _extract_recipients(self, message, recipient_type: str) -> List[str]:
+        """Extract recipient email addresses from a message.
+        
+        Args:
+            message: Outlook message object
+            recipient_type: 'To' or 'CC'
+        
+        Returns:
+            List of email addresses
+        """
+        recipients = []
+        try:
+            recipient_collection = message.Recipients
+            # Outlook recipient types: 1=To, 2=CC, 3=BCC
+            type_map = {"To": 1, "CC": 2, "BCC": 3}
+            target_type = type_map.get(recipient_type, 1)
+            
+            for i in range(1, recipient_collection.Count + 1):
+                recipient = recipient_collection.Item(i)
+                if recipient.Type == target_type:
+                    # Try to get SMTP address
+                    try:
+                        smtp_address = recipient.PropertyAccessor.GetProperty(
+                            "http://schemas.microsoft.com/mapi/proptag/0x39FE001F"
+                        )
+                        recipients.append(smtp_address.lower())
+                    except:
+                        # Fall back to Address property
+                        addr = recipient.Address
+                        if addr and "@" in addr:
+                            recipients.append(addr.lower())
+        except:
+            pass
+        return recipients
+    
     def get_emails(self, days: int = 7, folder_id: int = None, 
-                   exclude_categories: List[str] = None) -> Generator[Email, None, None]:
+                   exclude_categories: List[str] = None, direction: str = "inbound",
+                   since_time: datetime = None) -> Generator[Email, None, None]:
         """
         Fetch emails from Outlook.
         
         Args:
-            days: Number of days to look back
+            days: Number of days to look back (used if since_time not provided)
             folder_id: Outlook folder constant (default: Inbox)
             exclude_categories: Categories to exclude (e.g., ["Unfocused"])
+            direction: 'inbound' or 'outbound' - affects how domain is extracted
+            since_time: Fetch emails after this timestamp (overrides days if provided)
         
         Yields:
             Email objects
@@ -121,8 +250,11 @@ class OutlookClient:
         folder = self._namespace.GetDefaultFolder(folder_id)
         folder_path = folder.Name
         
-        # Calculate date filter
-        date_cutoff = datetime.now() - timedelta(days=days)
+        # Calculate date filter - use since_time if provided, otherwise use days
+        if since_time:
+            date_cutoff = since_time
+        else:
+            date_cutoff = datetime.now() - timedelta(days=days)
         date_str = date_cutoff.strftime("%m/%d/%Y %H:%M %p")
         filter_str = f"[ReceivedTime] >= '{date_str}'"
         
@@ -139,11 +271,36 @@ class OutlookClient:
                 if any(cat in msg_categories for cat in exclude_categories):
                     continue
                 
-                email = self._message_to_email(message, folder_path)
+                # For sent items, extract recipient domain
+                recipient_domain = None
+                if direction == "outbound":
+                    recipient_domain = self._get_primary_recipient_domain(message)
+                
+                email = self._message_to_email(message, folder_path, direction, recipient_domain)
                 if email:
                     yield email
             except:
                 continue
+    
+    def _get_primary_recipient_domain(self, message) -> str:
+        """Extract domain from primary recipient of a sent message."""
+        try:
+            recipients = message.Recipients
+            if recipients.Count > 0:
+                # Get first recipient
+                recipient = recipients.Item(1)
+                # Try to get SMTP address
+                try:
+                    smtp_address = recipient.PropertyAccessor.GetProperty(
+                        "http://schemas.microsoft.com/mapi/proptag/0x39FE001F"
+                    )
+                    return self._extract_domain(smtp_address)
+                except:
+                    # Fall back to Address property
+                    return self._extract_domain(recipient.Address)
+        except:
+            pass
+        return "(no domain)"
     
     def get_email_body(self, email_id: str, max_length: int = 10000) -> str:
         """
@@ -177,61 +334,165 @@ class OutlookClient:
         except Exception as e:
             return f"Error retrieving email HTML: {e}"
     
-    def sync_emails_to_db(self, days: int = 7, 
-                          exclude_categories: List[str] = None) -> dict:
+    def download_attachment(self, email_id: str, attachment_name: str, 
+                           save_path: Optional[str] = None) -> Dict[str, Any]:
         """
-        Sync emails from Outlook to database.
+        Download an attachment from an email and save it to disk.
+        
+        Args:
+            email_id: The Outlook EntryID of the email
+            attachment_name: The name of the attachment to download
+            save_path: Where to save the file. If not provided, saves to 
+                      ./attachments/{domain}/{date}/{filename}
         
         Returns:
-            Statistics about the sync operation
+            Dict with success status, file_path, file_size, and content_type
         """
-        stats = {"new": 0, "updated": 0, "domains_updated": 0}
-        domain_data = {}  # Track domain statistics
+        self._ensure_connection()
         
-        for email in self.get_emails(days=days, exclude_categories=exclude_categories):
-            # Check if email exists
-            existing = self.db.get_email(email.id)
-            if existing:
-                # Preserve triage data from existing email
-                email.triage_status = existing.triage_status
-                email.client_id = existing.client_id
-                email.matter_id = existing.matter_id
-                email.notes = existing.notes
-                email.processed_at = existing.processed_at
-                stats["updated"] += 1
-            else:
-                stats["new"] += 1
-            
-            self.db.upsert_email(email)
-            
-            # Track domain data
-            if email.domain not in domain_data:
-                domain_data[email.domain] = {
-                    "count": 0,
-                    "last_seen": email.received_time,
-                    "senders": set()
-                }
-            domain_data[email.domain]["count"] += 1
-            domain_data[email.domain]["senders"].add(email.sender_name)
-            if email.received_time > domain_data[email.domain]["last_seen"]:
-                domain_data[email.domain]["last_seen"] = email.received_time
+        # Get the email
+        try:
+            message = self._namespace.GetItemFromID(email_id)
+        except Exception as e:
+            return {"success": False, "error": f"Email not found: {e}"}
         
-        # Update domain records
-        for domain_name, data in domain_data.items():
-            existing_domain = self.db.get_domain(domain_name)
-            category = existing_domain.category if existing_domain else EmailCategory.UNCATEGORIZED
-            
-            domain = Domain(
-                name=domain_name,
-                category=category,
-                email_count=data["count"],
-                last_seen=data["last_seen"],
-                sample_senders=list(data["senders"])[:5]
-            )
-            self.db.upsert_domain(domain)
-            stats["domains_updated"] += 1
+        # Find the attachment
+        attachment = None
+        for i in range(1, message.Attachments.Count + 1):
+            att = message.Attachments.Item(i)
+            if att.FileName == attachment_name:
+                attachment = att
+                break
         
-        return stats
+        if not attachment:
+            # List available attachments for debugging
+            available = [message.Attachments.Item(i).FileName 
+                        for i in range(1, message.Attachments.Count + 1)]
+            return {
+                "success": False, 
+                "error": f"Attachment '{attachment_name}' not found",
+                "available_attachments": available
+            }
+        
+        # Determine save path
+        if not save_path:
+            # Get email metadata for default path
+            try:
+                # For sent emails, use recipient domain; for received, use sender domain
+                sender = message.SenderEmailAddress or ""
+                is_sent = sender.lower().endswith("harperjames.co.uk") or "@harperjames" in sender.lower()
+                
+                if is_sent and message.Recipients.Count > 0:
+                    # Use first recipient's domain for sent emails
+                    try:
+                        recip = message.Recipients.Item(1)
+                        recip_addr = recip.Address
+                        # Handle Exchange addresses
+                        if "@" not in recip_addr:
+                            try:
+                                recip_addr = recip.AddressEntry.GetExchangeUser().PrimarySmtpAddress
+                            except:
+                                recip_addr = recip.PropertyAccessor.GetProperty(
+                                    "http://schemas.microsoft.com/mapi/proptag/0x39FE001F"
+                                )
+                        domain = self._extract_domain(recip_addr) or "unknown"
+                    except:
+                        domain = "sent"
+                else:
+                    domain = self._extract_domain(sender) or "unknown"
+                
+                received = message.ReceivedTime
+                if hasattr(received, 'strftime'):
+                    date_str = received.strftime('%Y-%m-%d')
+                else:
+                    date_str = str(received)[:10]
+            except:
+                domain = "unknown"
+                date_str = datetime.now().strftime('%Y-%m-%d')
+            
+            # Sanitize domain for folder name
+            domain = "".join(c if c.isalnum() or c in '.-_' else '_' for c in domain)
+            
+            # Build default path
+            base_dir = os.path.join(os.path.dirname(__file__), "attachments")
+            save_path = os.path.join(base_dir, domain, date_str, attachment_name)
+        
+        # Ensure absolute path (required by Outlook's SaveAsFile)
+        save_path = os.path.abspath(save_path)
+        
+        # Create directory if needed
+        try:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        except Exception as e:
+            return {"success": False, "error": f"Failed to create directory: {e}"}
+        
+        # Save attachment
+        try:
+            attachment.SaveAsFile(save_path)
+            file_size = os.path.getsize(save_path)
+            
+            # Determine content type
+            content_type, _ = mimetypes.guess_type(attachment_name)
+            if not content_type:
+                content_type = "application/octet-stream"
+            
+            return {
+                "success": True,
+                "file_path": os.path.abspath(save_path),
+                "file_size": file_size,
+                "content_type": content_type
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to save attachment: {e}"}
+    
+    def list_attachments(self, email_id: str) -> Dict[str, Any]:
+        """
+        List all attachments for an email with details.
+        
+        Args:
+            email_id: The Outlook EntryID of the email
+            
+        Returns:
+            Dict with list of attachment details (name, size, type)
+        """
+        self._ensure_connection()
+        
+        try:
+            message = self._namespace.GetItemFromID(email_id)
+        except Exception as e:
+            return {"success": False, "error": f"Email not found: {e}"}
+        
+        attachments = []
+        for i in range(1, message.Attachments.Count + 1):
+            att = message.Attachments.Item(i)
+            filename = att.FileName
+            lower_name = filename.lower()
+            
+            # Determine if it's a real document (not inline image)
+            doc_extensions = ('.docx', '.doc', '.pdf', '.xlsx', '.xls', 
+                             '.pptx', '.ppt', '.zip', '.rar', '.csv', '.txt')
+            is_document = lower_name.endswith(doc_extensions)
+            
+            is_image = lower_name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))
+            is_inline = is_image and lower_name.startswith('image')
+            
+            content_type, _ = mimetypes.guess_type(filename)
+            
+            attachments.append({
+                "name": filename,
+                "size": att.Size,
+                "content_type": content_type or "application/octet-stream",
+                "is_document": is_document,
+                "is_inline_image": is_inline
+            })
+        
+        return {
+            "success": True,
+            "count": len(attachments),
+            "attachments": attachments,
+            "documents": [a for a in attachments if a["is_document"]],
+            "inline_images": [a for a in attachments if a["is_inline_image"]]
+        }
     
     def move_to_folder(self, email_id: str, folder_name: str) -> bool:
         """Move an email to a specified folder."""
@@ -269,3 +530,584 @@ class OutlookClient:
             return True
         except:
             return False
+
+    # Triage Status Methods (using Outlook Categories)
+    # Categories are prefixed with "Effi:" to avoid conflicts with user categories
+    TRIAGE_CATEGORY_PREFIX = "Effi:"
+    TRIAGE_CATEGORIES = {
+        "processed": "Effi:Processed",
+        "deferred": "Effi:Deferred",
+        "archived": "Effi:Archived",
+    }
+    
+    def set_triage_status(self, email_id: str, status: str) -> bool:
+        """
+        Set triage status on an email using Outlook categories.
+        
+        Args:
+            email_id: Outlook EntryID
+            status: One of 'processed', 'deferred', 'archived'
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if status not in self.TRIAGE_CATEGORIES:
+            return False
+            
+        self._ensure_connection()
+        
+        try:
+            message = self._namespace.GetItemFromID(email_id)
+            existing = message.Categories or ""
+            
+            # Remove any existing Effi: triage categories
+            categories = [c.strip() for c in existing.split(",") if c.strip()]
+            categories = [c for c in categories if not c.startswith(self.TRIAGE_CATEGORY_PREFIX)]
+            
+            # Add the new triage category
+            categories.append(self.TRIAGE_CATEGORIES[status])
+            
+            message.Categories = ", ".join(categories)
+            message.Save()
+            return True
+        except Exception as e:
+            return False
+    
+    def get_triage_status(self, email_id: str) -> Optional[str]:
+        """
+        Get triage status from an email's Outlook categories.
+        
+        Args:
+            email_id: Outlook EntryID
+            
+        Returns:
+            Status string ('processed', 'deferred', 'archived') or None if pending/not triaged
+        """
+        self._ensure_connection()
+        
+        try:
+            message = self._namespace.GetItemFromID(email_id)
+            categories = message.Categories or ""
+            
+            for status, category in self.TRIAGE_CATEGORIES.items():
+                if category in categories:
+                    return status
+            return None  # No triage category = pending
+        except:
+            return None
+    
+    def clear_triage_status(self, email_id: str) -> bool:
+        """
+        Remove triage status from an email (reset to pending).
+        
+        Args:
+            email_id: Outlook EntryID
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        self._ensure_connection()
+        
+        try:
+            message = self._namespace.GetItemFromID(email_id)
+            existing = message.Categories or ""
+            
+            # Remove all Effi: categories
+            categories = [c.strip() for c in existing.split(",") if c.strip()]
+            categories = [c for c in categories if not c.startswith(self.TRIAGE_CATEGORY_PREFIX)]
+            
+            message.Categories = ", ".join(categories)
+            message.Save()
+            return True
+        except:
+            return False
+    
+    def batch_set_triage_status(self, email_ids: List[str], status: str) -> Dict[str, Any]:
+        """
+        Set triage status on multiple emails.
+        
+        Args:
+            email_ids: List of Outlook EntryIDs
+            status: One of 'processed', 'deferred', 'archived'
+            
+        Returns:
+            Dict with success count, failure count, and failed IDs
+        """
+        results = {"success": 0, "failed": 0, "failed_ids": []}
+        
+        for email_id in email_ids:
+            if self.set_triage_status(email_id, status):
+                results["success"] += 1
+            else:
+                results["failed"] += 1
+                results["failed_ids"].append(email_id)
+        
+        return results
+
+    def get_pending_emails(
+        self,
+        days: int = 30,
+        date_from: datetime = None,
+        limit: int = 200,
+        group_by_domain: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Get inbound emails that haven't been triaged (no Effi: category).
+        
+        Args:
+            days: Days to look back (default 30)
+            date_from: Start date (overrides days)
+            limit: Maximum results
+            group_by_domain: If True, group results by sender domain
+            
+        Returns:
+            Dict with emails grouped by domain or flat list
+        """
+        self._ensure_connection()
+        
+        folder = self._namespace.GetDefaultFolder(self.FOLDER_INBOX)
+        
+        # Set date range
+        if not date_from:
+            date_from = datetime.now() - timedelta(days=days)
+        
+        date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+        date_query = f"[ReceivedTime] >= '{date_str}'"
+        
+        messages = folder.Items
+        messages.Sort("[ReceivedTime]", True)
+        
+        try:
+            filtered = messages.Restrict(date_query)
+        except:
+            filtered = messages
+        
+        pending_emails = []
+        
+        for message in filtered:
+            if len(pending_emails) >= limit:
+                break
+            
+            try:
+                # Check if message has any Effi: triage categories
+                categories = message.Categories or ""
+                has_triage = any(cat.strip().startswith(self.TRIAGE_CATEGORY_PREFIX) 
+                                for cat in categories.split(",") if cat.strip())
+                
+                if not has_triage:
+                    email = self._message_to_email(message, folder.Name, "inbound")
+                    if email:
+                        pending_emails.append(email)
+            except:
+                continue
+        
+        if not group_by_domain:
+            return {"emails": pending_emails, "total": len(pending_emails)}
+        
+        # Group by domain
+        by_domain = {}
+        for email in pending_emails:
+            domain = email.domain or "(no domain)"
+            if domain not in by_domain:
+                by_domain[domain] = []
+            by_domain[domain].append(email)
+        
+        # Sort domains by email count (highest first)
+        sorted_domains = sorted(by_domain.items(), key=lambda x: len(x[1]), reverse=True)
+        
+        return {
+            "domains": [
+                {
+                    "domain": domain,
+                    "count": len(emails),
+                    "emails": emails
+                }
+                for domain, emails in sorted_domains
+            ],
+            "total": len(pending_emails)
+        }
+
+    def get_pending_emails_from_domain(
+        self,
+        domain: str,
+        days: int = 30,
+        limit: int = 100,
+    ) -> List[Email]:
+        """
+        Get pending (un-triaged) emails from a specific domain.
+        
+        Args:
+            domain: Sender domain to filter
+            days: Days to look back
+            limit: Maximum results
+            
+        Returns:
+            List of pending Email objects from that domain
+        """
+        self._ensure_connection()
+        
+        folder = self._namespace.GetDefaultFolder(self.FOLDER_INBOX)
+        
+        date_from = datetime.now() - timedelta(days=days)
+        date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+        
+        # Use DASL for domain filter
+        dasl_query = f"@SQL=\"urn:schemas:httpmail:fromemail\" LIKE '%@{domain}'"
+        date_query = f"[ReceivedTime] >= '{date_str}'"
+        
+        messages = folder.Items
+        messages.Sort("[ReceivedTime]", True)
+        
+        try:
+            # Apply date filter first
+            filtered_by_date = messages.Restrict(date_query)
+            # Then DASL filter for domain
+            filtered = filtered_by_date.Restrict(dasl_query)
+        except:
+            # Fallback
+            filtered = messages.Restrict(date_query)
+        
+        pending_emails = []
+        
+        for message in filtered:
+            if len(pending_emails) >= limit:
+                break
+            
+            try:
+                # Only include if no Effi: category
+                categories = message.Categories or ""
+                has_triage = any(cat.strip().startswith(self.TRIAGE_CATEGORY_PREFIX) 
+                                for cat in categories.split(",") if cat.strip())
+                
+                if not has_triage:
+                    email = self._message_to_email(message, folder.Name, "inbound")
+                    if email:
+                        pending_emails.append(email)
+            except:
+                continue
+        
+        return pending_emails
+
+    # DASL Query Support for Direct Outlook Searches
+    def _build_dasl_query(
+        self,
+        sender_domain: str = None,
+        sender_email: str = None,
+        recipient_domain: str = None,
+        recipient_email: str = None,
+        subject_contains: str = None,
+        body_contains: str = None,
+        date_from: datetime = None,
+        date_to: datetime = None,
+    ) -> str:
+        """Build a DASL query string for Outlook Items.Restrict().
+        
+        Uses @SQL= prefix with urn:schemas:httpmail properties for filtering.
+        DASL queries require the @SQL= prefix and quoted property names.
+        
+        Note: Date filters use Jet syntax and can't be combined with DASL in one query.
+        The caller must handle date filtering separately or use date-only queries.
+        
+        Args:
+            sender_domain: Filter by sender's domain (e.g., 'client.com')
+            sender_email: Filter by exact sender email
+            recipient_domain: Filter by recipient domain in displayto
+            recipient_email: Filter by exact recipient email
+            subject_contains: Subject line contains this text
+            body_contains: Body contains this text
+            date_from: Start date (uses Jet syntax, can't mix with DASL)
+            date_to: End date (uses Jet syntax, can't mix with DASL)
+            
+        Returns:
+            DASL query string for use with Items.Restrict()
+        """
+        dasl_conditions = []
+        jet_conditions = []
+        
+        # Sender email filter (DASL)
+        if sender_email:
+            dasl_conditions.append(f"\"urn:schemas:httpmail:fromemail\" LIKE '%{sender_email}%'")
+        elif sender_domain:
+            dasl_conditions.append(f"\"urn:schemas:httpmail:fromemail\" LIKE '%@{sender_domain}'")
+        
+        # Recipient filter (DASL - using displayto which contains recipient names/emails)
+        if recipient_email:
+            dasl_conditions.append(f"\"urn:schemas:httpmail:displayto\" LIKE '%{recipient_email}%'")
+        elif recipient_domain:
+            dasl_conditions.append(f"\"urn:schemas:httpmail:displayto\" LIKE '%@{recipient_domain}%'")
+        
+        # Subject filter (DASL)
+        if subject_contains:
+            dasl_conditions.append(f"\"urn:schemas:httpmail:subject\" LIKE '%{subject_contains}%'")
+        
+        # Body filter (DASL)
+        if body_contains:
+            dasl_conditions.append(f"\"urn:schemas:httpmail:textdescription\" LIKE '%{body_contains}%'")
+        
+        # Date range (Jet syntax - must be separate query if mixing)
+        if date_from:
+            date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+            jet_conditions.append(f"[ReceivedTime] >= '{date_str}'")
+        
+        if date_to:
+            date_str = date_to.strftime("%m/%d/%Y %H:%M %p")
+            jet_conditions.append(f"[ReceivedTime] <= '{date_str}'")
+        
+        # If we have DASL conditions, use @SQL= prefix
+        if dasl_conditions:
+            dasl_query = "@SQL=" + " AND ".join(dasl_conditions)
+            # Can't mix DASL and Jet - return DASL only, caller must filter dates
+            return dasl_query
+        elif jet_conditions:
+            # Jet-only query for dates
+            return " AND ".join(jet_conditions)
+        
+        return ""
+
+    def search_outlook(
+        self,
+        sender_domain: str = None,
+        sender_email: str = None,
+        recipient_domain: str = None,
+        recipient_email: str = None,
+        subject_contains: str = None,
+        body_contains: str = None,
+        date_from: datetime = None,
+        date_to: datetime = None,
+        days: int = 30,
+        folder: str = "Inbox",
+        limit: int = 50,
+    ) -> List[Email]:
+        """Search Outlook directly with flexible filters.
+        
+        This searches Outlook directly without syncing to the database.
+        Use for historical lookups or ad-hoc searches.
+        
+        Args:
+            sender_domain: Filter by sender's domain
+            sender_email: Filter by exact sender email
+            recipient_domain: Filter by recipient domain
+            recipient_email: Filter by exact recipient email
+            subject_contains: Subject line contains text
+            body_contains: Body contains text
+            date_from: Start date (overrides days)
+            date_to: End date
+            days: Days to look back (default 30)
+            folder: Outlook folder name ('Inbox', 'Sent Items', etc.)
+            limit: Maximum results
+            
+        Returns:
+            List of Email objects matching the filters
+        """
+        self._ensure_connection()
+        
+        # Determine folder
+        if folder.lower() in ["sent", "sent items"]:
+            folder_id = self.FOLDER_SENT
+            direction = "outbound"
+        else:
+            folder_id = self.FOLDER_INBOX
+            direction = "inbound"
+        
+        folder_obj = self._namespace.GetDefaultFolder(folder_id)
+        
+        # Set date range
+        if not date_from:
+            date_from = datetime.now() - timedelta(days=days)
+        
+        # Build DASL query (without dates - DASL and Jet can't be mixed)
+        dasl_query = self._build_dasl_query(
+            sender_domain=sender_domain,
+            sender_email=sender_email,
+            recipient_domain=recipient_domain,
+            recipient_email=recipient_email,
+            subject_contains=subject_contains,
+            body_contains=body_contains,
+            # Don't pass dates here - we'll filter manually
+        )
+        
+        results = []
+        messages = folder_obj.Items
+        messages.Sort("[ReceivedTime]", True)
+        
+        # First apply date filter (Jet syntax), then DASL filter if we have one
+        date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+        date_query = f"[ReceivedTime] >= '{date_str}'"
+        if date_to:
+            date_to_str = date_to.strftime("%m/%d/%Y %H:%M %p")
+            date_query += f" AND [ReceivedTime] <= '{date_to_str}'"
+        
+        try:
+            # Apply date filter first
+            filtered_by_date = messages.Restrict(date_query)
+            
+            # If we have a DASL query, apply it to the date-filtered results
+            if dasl_query:
+                try:
+                    filtered = filtered_by_date.Restrict(dasl_query)
+                except Exception as e:
+                    # DASL failed, use date-filtered only
+                    filtered = filtered_by_date
+            else:
+                filtered = filtered_by_date
+        except Exception as e:
+            # Fallback to simple date filter
+            filtered = messages.Restrict(f"[ReceivedTime] >= '{date_str}'")
+        
+        for message in filtered:
+            if len(results) >= limit:
+                break
+            
+            try:
+                email = self._message_to_email(message, folder_obj.Name, direction)
+                if email:
+                    results.append(email)
+            except:
+                continue
+        
+        return results
+
+    def search_outlook_by_identifiers(
+        self,
+        domains: List[str],
+        contact_emails: List[str] = None,
+        days: int = 30,
+        date_from: datetime = None,
+        date_to: datetime = None,
+        limit: int = 100,
+    ) -> List[Email]:
+        """Search Outlook for emails matching client domains/contact emails.
+        
+        Searches both Inbox (inbound) and Sent Items (outbound).
+        
+        Args:
+            domains: List of domains to search for
+            contact_emails: List of specific email addresses to search for
+            days: Days to look back
+            date_from: Start date (overrides days)
+            date_to: End date
+            limit: Maximum results
+            
+        Returns:
+            List of matching Email objects
+        """
+        results = []
+        contact_emails = contact_emails or []
+        
+        if not date_from:
+            date_from = datetime.now() - timedelta(days=days)
+        
+        # Search Inbox for inbound emails
+        for domain in domains:
+            inbox_results = self.search_outlook(
+                sender_domain=domain,
+                date_from=date_from,
+                date_to=date_to,
+                folder="Inbox",
+                limit=limit,
+            )
+            results.extend(inbox_results)
+        
+        # Search for contact emails (personal addresses)
+        for email in contact_emails:
+            inbox_results = self.search_outlook(
+                sender_email=email,
+                date_from=date_from,
+                date_to=date_to,
+                folder="Inbox",
+                limit=limit,
+            )
+            results.extend(inbox_results)
+        
+        # Search Sent Items for outbound emails
+        for domain in domains:
+            sent_results = self.search_outlook(
+                recipient_domain=domain,
+                date_from=date_from,
+                date_to=date_to,
+                folder="Sent Items",
+                limit=limit,
+            )
+            results.extend(sent_results)
+        
+        # Deduplicate by email ID and limit
+        seen_ids = set()
+        unique_results = []
+        for email in results:
+            if email.id not in seen_ids:
+                seen_ids.add(email.id)
+                unique_results.append(email)
+                if len(unique_results) >= limit:
+                    break
+        
+        return unique_results
+
+    def get_email_full(self, email_id: str) -> Dict[str, Any]:
+        """Get full email details by EntryID including body and attachments.
+        
+        Args:
+            email_id: Outlook EntryID
+            
+        Returns:
+            Dict with full email details including body and attachment metadata
+        """
+        self._ensure_connection()
+        
+        try:
+            message = self._namespace.GetItemFromID(email_id)
+            
+            # Get body
+            body = message.Body or ""
+            html_body = message.HTMLBody or ""
+            
+            # Get attachments
+            attachments = []
+            for i in range(1, message.Attachments.Count + 1):
+                att = message.Attachments.Item(i)
+                attachments.append({
+                    "name": att.FileName,
+                    "size": att.Size,
+                })
+            
+            # Get recipients
+            recipients_to = self._extract_recipients(message, "To")
+            recipients_cc = self._extract_recipients(message, "CC")
+            
+            return {
+                "id": email_id,
+                "subject": message.Subject or "(No Subject)",
+                "sender_name": message.SenderName or "",
+                "sender_email": self._get_sender_email(message),
+                "received_time": message.ReceivedTime.isoformat() if hasattr(message.ReceivedTime, 'isoformat') else str(message.ReceivedTime),
+                "body": body,
+                "html_body": html_body,
+                "recipients_to": recipients_to,
+                "recipients_cc": recipients_cc,
+                "attachments": attachments,
+                "internet_message_id": self._get_internet_message_id(message),
+                "conversation_id": getattr(message, 'ConversationID', None),
+            }
+        except Exception as e:
+            raise Exception(f"Error retrieving email: {e}")
+
+    def get_email_for_sync(self, email_id: str) -> Optional[Email]:
+        """Get an email from Outlook ready for syncing to database.
+        
+        Args:
+            email_id: Outlook EntryID
+            
+        Returns:
+            Email object ready for database insertion
+        """
+        self._ensure_connection()
+        
+        try:
+            message = self._namespace.GetItemFromID(email_id)
+            
+            # Determine direction based on folder
+            folder_path = message.Parent.Name if hasattr(message, 'Parent') else "Inbox"
+            direction = "outbound" if "Sent" in folder_path else "inbound"
+            
+            return self._message_to_email(message, folder_path, direction)
+        except Exception as e:
+            return None
