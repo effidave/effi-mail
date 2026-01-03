@@ -89,7 +89,7 @@ class Domain:
 
 @dataclass
 class Client:
-    """Represents a client (metadata only - domains come from effi-clients)."""
+    """Represents a client (metadata only - domains come from effi-core)."""
     id: str
     name: str
     folder_path: Optional[str] = None  # Path in effi-work

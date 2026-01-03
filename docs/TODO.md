@@ -4,6 +4,23 @@ This document tracks planned enhancements for effi-mail.
 
 ## High Priority
 
+### Lightweight Search Results
+**Status:** Planned
+
+Create `_message_to_search_result()` for faster `search_outlook` responses.
+
+**Current Performance:**
+- `_message_to_email()` takes ~125ms per email
+- Expensive operations: recipients extraction, attachment filtering, PropertyAccessor calls
+- 19 emails takes ~2.4s total
+
+**Proposed Solution:**
+- Return minimal fields: id, subject, sender, date, preview, has_attachments (~10-15ms per email)
+- 19 emails would drop from 2.4s → 0.2s
+- Use `get_email_details` or `get_email_content` for full info on specific emails
+
+---
+
 ### FTS5 Full-Text Search
 **Status:** Planned
 
@@ -36,6 +53,25 @@ Add `include_subfolders` parameter to `search_outlook_direct` and related tools.
 - Recursively iterate folder.Folders collection
 - May impact performance for deep folder hierarchies
 - Consider depth limit parameter
+
+---
+
+### Migrate Legacy Database to effi-core
+**Status:** Planned
+
+The legacy SQLite database (`effi_mail.db`) contains 28 clients and 7 matters that should be migrated to effi-core.
+
+**Contents:**
+- 28 clients with domains
+- 7 matters/projects
+- 1464 historical emails (no longer needed)
+- 73 domain categorizations (already in domain_categories.json)
+
+**Migration Steps:**
+1. Export clients from effi_mail.db
+2. Create client folders in effi-core workspace
+3. Migrate matters as subfolders
+4. Delete database.py, migrate_domains.py, and effi_mail.db
 
 ---
 

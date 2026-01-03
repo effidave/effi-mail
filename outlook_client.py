@@ -29,12 +29,27 @@ class OutlookClient:
         self._outlook = None
         self._namespace = None
     
+    def _reset_connection(self):
+        """Reset COM connection (call when Outlook restarts)."""
+        self._outlook = None
+        self._namespace = None
+    
     def _ensure_connection(self):
-        """Ensure COM connection is established."""
+        """Ensure COM connection is established. Auto-reconnects if stale."""
         if self._outlook is None:
             pythoncom.CoInitialize()
             self._outlook = win32com.client.Dispatch("Outlook.Application")
             self._namespace = self._outlook.GetNamespace("MAPI")
+        else:
+            # Test if connection is still valid
+            try:
+                _ = self._namespace.CurrentUser
+            except Exception:
+                # Connection stale, reconnect
+                self._reset_connection()
+                pythoncom.CoInitialize()
+                self._outlook = win32com.client.Dispatch("Outlook.Application")
+                self._namespace = self._outlook.GetNamespace("MAPI")
     
     def _get_sender_email(self, message) -> str:
         """Extract sender email, handling Exchange addresses."""
@@ -532,12 +547,12 @@ class OutlookClient:
             return False
 
     # Triage Status Methods (using Outlook Categories)
-    # Categories are prefixed with "Effi:" to avoid conflicts with user categories
-    TRIAGE_CATEGORY_PREFIX = "Effi:"
+    # Categories are prefixed with "effi:" to avoid conflicts with user categories
+    TRIAGE_CATEGORY_PREFIX = "effi:"
     TRIAGE_CATEGORIES = {
-        "processed": "Effi:Processed",
-        "deferred": "Effi:Deferred",
-        "archived": "Effi:Archived",
+        "processed": "effi:processed",
+        "deferred": "effi:deferred",
+        "archived": "effi:archived",
     }
     
     def set_triage_status(self, email_id: str, status: str) -> bool:
@@ -560,7 +575,7 @@ class OutlookClient:
             message = self._namespace.GetItemFromID(email_id)
             existing = message.Categories or ""
             
-            # Remove any existing Effi: triage categories
+            # Remove any existing effi: triage categories
             categories = [c.strip() for c in existing.split(",") if c.strip()]
             categories = [c for c in categories if not c.startswith(self.TRIAGE_CATEGORY_PREFIX)]
             
@@ -612,7 +627,7 @@ class OutlookClient:
             message = self._namespace.GetItemFromID(email_id)
             existing = message.Categories or ""
             
-            # Remove all Effi: categories
+            # Remove all effi: categories
             categories = [c.strip() for c in existing.split(",") if c.strip()]
             categories = [c for c in categories if not c.startswith(self.TRIAGE_CATEGORY_PREFIX)]
             
@@ -652,7 +667,7 @@ class OutlookClient:
         group_by_domain: bool = True,
     ) -> Dict[str, Any]:
         """
-        Get inbound emails that haven't been triaged (no Effi: category).
+        Get inbound emails that haven't been triaged (no effi: category).
         
         Args:
             days: Days to look back (default 30)
@@ -689,7 +704,7 @@ class OutlookClient:
                 break
             
             try:
-                # Check if message has any Effi: triage categories
+                # Check if message has any effi: triage categories
                 categories = message.Categories or ""
                 has_triage = any(cat.strip().startswith(self.TRIAGE_CATEGORY_PREFIX) 
                                 for cat in categories.split(",") if cat.strip())
@@ -725,6 +740,93 @@ class OutlookClient:
                 for domain, emails in sorted_domains
             ],
             "total": len(pending_emails)
+        }
+
+    def get_domain_counts(
+        self,
+        days: int = 30,
+        limit: Optional[int] = None,
+        pending_only: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Fast method to get domain counts from emails.
+        
+        Only extracts sender domain and subject - no full email conversion.
+        Much faster than get_pending_emails for domain discovery.
+        
+        Args:
+            days: Days to look back (default 30)
+            limit: Maximum messages to scan (None = no limit)
+            pending_only: If True, only count pending emails. If False, count all emails.
+            
+        Returns:
+            Dict with domains, counts, and sample subjects
+        """
+        self._ensure_connection()
+        
+        folder = self._namespace.GetDefaultFolder(self.FOLDER_INBOX)
+        
+        date_from = datetime.now() - timedelta(days=days)
+        date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+        date_query = f"[ReceivedTime] >= '{date_str}'"
+        
+        messages = folder.Items
+        messages.Sort("[ReceivedTime]", True)
+        
+        try:
+            filtered = messages.Restrict(date_query)
+        except:
+            filtered = messages
+        
+        # Track domains with counts and sample subjects
+        domain_data: Dict[str, Dict] = {}
+        scanned = 0
+        
+        for message in filtered:
+            if limit is not None and scanned >= limit:
+                break
+            scanned += 1
+            
+            try:
+                # Check if message has any effi: triage categories
+                if pending_only:
+                    categories = message.Categories or ""
+                    has_triage = any(cat.strip().startswith(self.TRIAGE_CATEGORY_PREFIX) 
+                                    for cat in categories.split(",") if cat.strip())
+                    if has_triage:
+                        continue
+                
+                # Fast extraction - just sender and subject
+                sender_email = self._get_sender_email(message)
+                domain = self._extract_domain(sender_email)
+                subject = message.Subject or "(No Subject)"
+                received_time = message.ReceivedTime
+                
+                if domain not in domain_data:
+                    domain_data[domain] = {"count": 0, "subjects": [], "latest": received_time}
+                domain_data[domain]["count"] += 1
+                # Track most recent email for this domain
+                if received_time > domain_data[domain]["latest"]:
+                    domain_data[domain]["latest"] = received_time
+                if len(domain_data[domain]["subjects"]) < 3:
+                    domain_data[domain]["subjects"].append(subject)
+            except:
+                continue
+        
+        # Sort by most recent email first
+        sorted_domains = sorted(domain_data.items(), key=lambda x: x[1]["latest"], reverse=True)
+        
+        return {
+            "domains": [
+                {
+                    "domain": domain,
+                    "count": data["count"],
+                    "sample_subjects": data["subjects"]
+                }
+                for domain, data in sorted_domains
+            ],
+            "total_scanned": scanned,
+            "total_pending": sum(d["count"] for d in domain_data.values())
         }
 
     def get_pending_emails_from_domain(
@@ -774,7 +876,7 @@ class OutlookClient:
                 break
             
             try:
-                # Only include if no Effi: category
+                # Only include if no effi: category
                 categories = message.Categories or ""
                 has_triage = any(cat.strip().startswith(self.TRIAGE_CATEGORY_PREFIX) 
                                 for cat in categories.split(",") if cat.strip())
@@ -789,7 +891,10 @@ class OutlookClient:
         return pending_emails
 
     # DASL Query Support for Direct Outlook Searches
-    def _build_dasl_query(
+    # DASL property path for custom RecipientDomain field (PS_PUBLIC_STRINGS namespace)
+    RECIPIENT_DOMAIN_PROP = "http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/RecipientDomain"
+
+    def _build_query(
         self,
         sender_domain: str = None,
         sender_email: str = None,
@@ -799,42 +904,50 @@ class OutlookClient:
         body_contains: str = None,
         date_from: datetime = None,
         date_to: datetime = None,
-    ) -> str:
-        """Build a DASL query string for Outlook Items.Restrict().
+    ) -> tuple:
+        """Build query strings for Outlook Items.Restrict().
         
-        Uses @SQL= prefix with urn:schemas:httpmail properties for filtering.
-        DASL queries require the @SQL= prefix and quoted property names.
+        Returns separate Jet and DASL queries. DASL cannot be applied to an
+        already-restricted collection, so if we have DASL conditions, we include
+        dates in the DASL query to make it a single query.
         
-        Note: Date filters use Jet syntax and can't be combined with DASL in one query.
-        The caller must handle date filtering separately or use date-only queries.
+        Strategy:
+        - If only dates: use Jet (indexed, fast)
+        - If any DASL conditions: include dates in DASL query (single Restrict)
+        - RecipientDomain uses DASL with full MAPI property path (supports LIKE)
+        - Sender filters use DASL (urn:schemas:httpmail:fromemail) for Exchange compatibility
         
         Args:
             sender_domain: Filter by sender's domain (e.g., 'client.com')
             sender_email: Filter by exact sender email
-            recipient_domain: Filter by recipient domain in displayto
+            recipient_domain: Filter by recipient domain (uses custom RecipientDomain field)
             recipient_email: Filter by exact recipient email
             subject_contains: Subject line contains this text
             body_contains: Body contains this text
-            date_from: Start date (uses Jet syntax, can't mix with DASL)
-            date_to: End date (uses Jet syntax, can't mix with DASL)
+            date_from: Start date
+            date_to: End date
             
         Returns:
-            DASL query string for use with Items.Restrict()
+            Tuple of (jet_query, dasl_query) - if dasl_query is set, jet_query will be None
         """
         dasl_conditions = []
-        jet_conditions = []
         
-        # Sender email filter (DASL)
+        # Recipient domain uses custom RecipientDomain field (DASL with MAPI path)
+        # This field is populated by VBA macro with semicolon-separated domains
+        # DASL syntax requires single quotes for values
+        if recipient_domain:
+            dasl_conditions.append(f'"{self.RECIPIENT_DOMAIN_PROP}" LIKE \'%{recipient_domain}%\'')
+        
+        # Sender filters use DASL for Exchange compatibility
+        # [SenderEmailAddress] in Jet may return Exchange DN instead of SMTP address
         if sender_email:
             dasl_conditions.append(f"\"urn:schemas:httpmail:fromemail\" LIKE '%{sender_email}%'")
         elif sender_domain:
             dasl_conditions.append(f"\"urn:schemas:httpmail:fromemail\" LIKE '%@{sender_domain}'")
         
-        # Recipient filter (DASL - using displayto which contains recipient names/emails)
+        # Recipient email uses DASL (displayto has display names, but works for exact emails)
         if recipient_email:
             dasl_conditions.append(f"\"urn:schemas:httpmail:displayto\" LIKE '%{recipient_email}%'")
-        elif recipient_domain:
-            dasl_conditions.append(f"\"urn:schemas:httpmail:displayto\" LIKE '%@{recipient_domain}%'")
         
         # Subject filter (DASL)
         if subject_contains:
@@ -844,25 +957,30 @@ class OutlookClient:
         if body_contains:
             dasl_conditions.append(f"\"urn:schemas:httpmail:textdescription\" LIKE '%{body_contains}%'")
         
-        # Date range (Jet syntax - must be separate query if mixing)
+        # If we have DASL conditions, include dates in DASL (can't chain Restrict calls)
+        if dasl_conditions:
+            # Add dates to DASL query using urn:schemas:httpmail:datereceived
+            if date_from:
+                date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+                dasl_conditions.append(f"\"urn:schemas:httpmail:datereceived\" >= '{date_str}'")
+            if date_to:
+                date_str = date_to.strftime("%m/%d/%Y %H:%M %p")
+                dasl_conditions.append(f"\"urn:schemas:httpmail:datereceived\" <= '{date_str}'")
+            
+            dasl_query = "@SQL=" + " AND ".join(dasl_conditions)
+            return (None, dasl_query)
+        
+        # No DASL conditions - use Jet for dates only (indexed, fast)
+        jet_conditions = []
         if date_from:
             date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
             jet_conditions.append(f"[ReceivedTime] >= '{date_str}'")
-        
         if date_to:
             date_str = date_to.strftime("%m/%d/%Y %H:%M %p")
             jet_conditions.append(f"[ReceivedTime] <= '{date_str}'")
         
-        # If we have DASL conditions, use @SQL= prefix
-        if dasl_conditions:
-            dasl_query = "@SQL=" + " AND ".join(dasl_conditions)
-            # Can't mix DASL and Jet - return DASL only, caller must filter dates
-            return dasl_query
-        elif jet_conditions:
-            # Jet-only query for dates
-            return " AND ".join(jet_conditions)
-        
-        return ""
+        jet_query = " AND ".join(jet_conditions) if jet_conditions else None
+        return (jet_query, None)
 
     def search_outlook(
         self,
@@ -882,6 +1000,10 @@ class OutlookClient:
         
         This searches Outlook directly without syncing to the database.
         Use for historical lookups or ad-hoc searches.
+        
+        Query strategy:
+        - Jet query first (dates + RecipientDomain) for indexed performance
+        - DASL query second (sender filters) for Exchange SMTP address compatibility
         
         Args:
             sender_domain: Filter by sender's domain
@@ -915,43 +1037,37 @@ class OutlookClient:
         if not date_from:
             date_from = datetime.now() - timedelta(days=days)
         
-        # Build DASL query (without dates - DASL and Jet can't be mixed)
-        dasl_query = self._build_dasl_query(
+        # Build separate Jet and DASL queries (can't be mixed)
+        jet_query, dasl_query = self._build_query(
             sender_domain=sender_domain,
             sender_email=sender_email,
             recipient_domain=recipient_domain,
             recipient_email=recipient_email,
             subject_contains=subject_contains,
             body_contains=body_contains,
-            # Don't pass dates here - we'll filter manually
+            date_from=date_from,
+            date_to=date_to,
         )
         
         results = []
         messages = folder_obj.Items
         messages.Sort("[ReceivedTime]", True)
         
-        # First apply date filter (Jet syntax), then DASL filter if we have one
-        date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
-        date_query = f"[ReceivedTime] >= '{date_str}'"
-        if date_to:
-            date_to_str = date_to.strftime("%m/%d/%Y %H:%M %p")
-            date_query += f" AND [ReceivedTime] <= '{date_to_str}'"
-        
         try:
-            # Apply date filter first
-            filtered_by_date = messages.Restrict(date_query)
-            
-            # If we have a DASL query, apply it to the date-filtered results
+            # Apply query - either Jet (dates only) or DASL (all conditions including dates)
+            # Only one will be set based on _build_query logic
             if dasl_query:
-                try:
-                    filtered = filtered_by_date.Restrict(dasl_query)
-                except Exception as e:
-                    # DASL failed, use date-filtered only
-                    filtered = filtered_by_date
+                # DASL query includes dates - single Restrict call
+                filtered = messages.Restrict(dasl_query)
+            elif jet_query:
+                # Jet query for dates only
+                filtered = messages.Restrict(jet_query)
             else:
-                filtered = filtered_by_date
+                # No filters
+                filtered = messages
         except Exception as e:
             # Fallback to simple date filter
+            date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
             filtered = messages.Restrict(f"[ReceivedTime] >= '{date_str}'")
         
         for message in filtered:
@@ -1111,3 +1227,222 @@ class OutlookClient:
             return self._message_to_email(message, folder_path, direction)
         except Exception as e:
             return None
+
+    # =========================================================================
+    # DMS (DMSforLegal) Methods - Read-only access to filed emails
+    # Structure: \\DMSforLegal\_My Matters\{Client}\{Matter}\Emails
+    # =========================================================================
+    
+    DMS_STORE_NAME = "DMSforLegal"
+    DMS_ROOT_FOLDER = "_My Matters"
+    DMS_EMAILS_FOLDER = "Emails"
+    
+    def _get_dms_store(self):
+        """Get the DMSforLegal Outlook store.
+        
+        Returns:
+            Store object or None if not found
+        """
+        self._ensure_connection()
+        
+        try:
+            for store in self._namespace.Stores:
+                if store.DisplayName == self.DMS_STORE_NAME:
+                    return store
+        except Exception:
+            pass
+        return None
+    
+    def _get_folder_by_path(self, path: str):
+        """Navigate to a folder by path within DMS store.
+        
+        Args:
+            path: Backslash-separated path like "_My Matters\\Client\\Matter\\Emails"
+            
+        Returns:
+            Folder object or None if not found
+        """
+        store = self._get_dms_store()
+        if not store:
+            return None
+        
+        try:
+            folder = store.GetRootFolder()
+            parts = path.split("\\")
+            
+            for part in parts:
+                if not part:
+                    continue
+                found = False
+                for subfolder in folder.Folders:
+                    if subfolder.Name == part:
+                        folder = subfolder
+                        found = True
+                        break
+                if not found:
+                    return None
+            return folder
+        except Exception:
+            return None
+    
+    def list_dms_clients(self) -> List[str]:
+        """List all client folders in DMS.
+        
+        Returns:
+            Sorted list of client folder names
+        """
+        folder = self._get_folder_by_path(self.DMS_ROOT_FOLDER)
+        if not folder:
+            return []
+        
+        try:
+            clients = [f.Name for f in folder.Folders]
+            return sorted(clients)
+        except Exception:
+            return []
+    
+    def list_dms_matters(self, client: str) -> List[str]:
+        """List all matter folders for a client in DMS.
+        
+        Args:
+            client: Client folder name (exact match)
+            
+        Returns:
+            Sorted list of matter folder names
+        """
+        path = f"{self.DMS_ROOT_FOLDER}\\{client}"
+        folder = self._get_folder_by_path(path)
+        if not folder:
+            return []
+        
+        try:
+            matters = [f.Name for f in folder.Folders]
+            return sorted(matters)
+        except Exception:
+            return []
+    
+    def get_dms_emails(self, client: str, matter: str, limit: int = 50) -> List[Email]:
+        """Get emails from a matter's Emails folder in DMS.
+        
+        Args:
+            client: Client folder name
+            matter: Matter folder name
+            limit: Maximum emails to return (default 50)
+            
+        Returns:
+            List of Email objects
+        """
+        path = f"{self.DMS_ROOT_FOLDER}\\{client}\\{matter}\\{self.DMS_EMAILS_FOLDER}"
+        folder = self._get_folder_by_path(path)
+        if not folder:
+            return []
+        
+        results = []
+        try:
+            items = folder.Items
+            items.Sort("[ReceivedTime]", True)  # Most recent first
+            
+            for message in items:
+                if len(results) >= limit:
+                    break
+                try:
+                    email = self._message_to_email(
+                        message, 
+                        folder_path=f"DMS/{client}/{matter}",
+                        direction="filed"
+                    )
+                    if email:
+                        results.append(email)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        
+        return results
+    
+    def search_dms_emails(
+        self,
+        client: str = None,
+        matter: str = None,
+        subject_contains: str = None,
+        date_from: datetime = None,
+        date_to: datetime = None,
+        limit: int = 50,
+    ) -> List[Email]:
+        """Search emails across DMS with optional filters.
+        
+        Args:
+            client: Filter by client name (optional - searches all if not provided)
+            matter: Filter by matter name (requires client)
+            subject_contains: Filter by subject text
+            date_from: Filter by start date
+            date_to: Filter by end date
+            limit: Maximum results (default 50)
+            
+        Returns:
+            List of Email objects matching filters
+        """
+        results = []
+        
+        # Determine which clients to search
+        if client:
+            clients_to_search = [client]
+        else:
+            clients_to_search = self.list_dms_clients()
+        
+        for c in clients_to_search:
+            if len(results) >= limit:
+                break
+            
+            # Determine which matters to search
+            if matter and client:
+                matters_to_search = [matter]
+            else:
+                matters_to_search = self.list_dms_matters(c)
+            
+            for m in matters_to_search:
+                if len(results) >= limit:
+                    break
+                
+                # Get emails from this matter
+                path = f"{self.DMS_ROOT_FOLDER}\\{c}\\{m}\\{self.DMS_EMAILS_FOLDER}"
+                folder = self._get_folder_by_path(path)
+                if not folder:
+                    continue
+                
+                try:
+                    items = folder.Items
+                    items.Sort("[ReceivedTime]", True)
+                    
+                    # Apply date filter if provided
+                    if date_from:
+                        date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+                        items = items.Restrict(f"[ReceivedTime] >= '{date_str}'")
+                    if date_to:
+                        date_str = date_to.strftime("%m/%d/%Y %H:%M %p")
+                        items = items.Restrict(f"[ReceivedTime] <= '{date_str}'")
+                    
+                    for message in items:
+                        if len(results) >= limit:
+                            break
+                        
+                        try:
+                            # Apply subject filter
+                            if subject_contains:
+                                subject = message.Subject or ""
+                                if subject_contains.lower() not in subject.lower():
+                                    continue
+                            
+                            email = self._message_to_email(
+                                message,
+                                folder_path=f"DMS/{c}/{m}",
+                                direction="filed"
+                            )
+                            if email:
+                                results.append(email)
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+        
+        return results

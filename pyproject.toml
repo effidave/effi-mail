@@ -1,16 +1,16 @@
 [project]
 name = "effi-mail"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server for Outlook email management with triage workflow"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.0.0",
+    "fastmcp>=2.0.0",
     "pywin32>=306",
 ]
 
 [project.scripts]
-effi-mail = "mcp_server:main"
+effi-mail = "effi_mail:main"
 
 [build-system]
 requires = ["hatchling"]

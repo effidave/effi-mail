@@ -1,10 +1,10 @@
-"""Client for accessing client data via effi-clients MCP server.
+"""Client for accessing client data via effi-core MCP server.
 
-This module uses the MCP client to call effi-clients tools, providing
-a clean contract boundary between effi-mail and effi-clients.
+This module uses the MCP client to call effi-core tools, providing
+a clean contract boundary between effi-mail and effi-core.
 The MCP tool signatures serve as the stable interface.
 
-Note: Client tools were moved from effi-work to effi-clients MCP server.
+Note: Client tools were moved from effi-work to effi-core MCP server.
 """
 
 import os
@@ -17,21 +17,21 @@ from mcp import ClientSession
 from mcp.client.stdio import stdio_client, StdioServerParameters
 
 
-# Configuration for effi-clients server
-EFFI_CLIENTS_PATH = os.environ.get("EFFI_CLIENTS_PATH", r"C:\Users\DavidSant\effi-clients")
-EFFI_CLIENTS_PYTHON = os.environ.get("EFFI_CLIENTS_PYTHON", r"C:\Users\DavidSant\effi-clients\.venv\Scripts\python.exe")
+# Configuration for effi-core server
+EFFI_CLIENTS_PATH = os.environ.get("EFFI_CLIENTS_PATH", r"C:\Users\DavidSant\effi-core")
+EFFI_CLIENTS_PYTHON = os.environ.get("EFFI_CLIENTS_PYTHON", r"C:\Users\DavidSant\effi-core\.venv\Scripts\python.exe")
 
 
 @asynccontextmanager
-async def get_effi_clients_session():
-    """Create a session with the effi-clients MCP server.
+async def get_effi_core_session():
+    """Create a session with the effi-core MCP server.
     
     Yields:
-        ClientSession connected to effi-clients
+        ClientSession connected to effi-core
     """
     server_params = StdioServerParameters(
         command=EFFI_CLIENTS_PYTHON,
-        args=[os.path.join(EFFI_CLIENTS_PATH, "mcp_server.py")],
+        args=["-m", "mcp_server.main"],
         cwd=EFFI_CLIENTS_PATH,
     )
     
@@ -42,9 +42,9 @@ async def get_effi_clients_session():
 
 
 async def get_client_identifiers_from_effi_work(client_id: str) -> Dict[str, Any]:
-    """Get client identifiers (domains, contact emails) from effi-clients via MCP.
+    """Get client identifiers (domains, contact emails) from effi-core via MCP.
     
-    Note: Function name kept for backwards compatibility, but now uses effi-clients.
+    Note: Function name kept for backwards compatibility, but now uses effi-core.
     
     Args:
         client_id: Client identifier (case-insensitive)
@@ -57,8 +57,8 @@ async def get_client_identifiers_from_effi_work(client_id: str) -> Dict[str, Any
             - source: 'effi-work' or error description
     """
     try:
-        async with get_effi_clients_session() as session:
-            # Call effi-clients' get_client_by_id tool
+        async with get_effi_core_session() as session:
+            # Call effi-core' get_client_by_id tool
             result = await session.call_tool(
                 "get_client_by_id",
                 {"client_id": client_id}
@@ -76,8 +76,13 @@ async def get_client_identifiers_from_effi_work(client_id: str) -> Dict[str, Any
                         "source": "not-found"
                     }
                 
-                # effi-clients returns: {folder, context: {domains, key_contacts, ...}, ...}
+                # effi-core returns: {folder, context: {domain or domains, key_contacts, ...}, ...}
                 context = data.get("context", {})
+                
+                # Handle both 'domain' (singular string) and 'domains' (list)
+                domains = context.get("domains", [])
+                if not domains and context.get("domain"):
+                    domains = [context.get("domain")]
                 
                 # Extract contact emails from key_contacts if available
                 contact_emails = context.get("contact_emails", [])
@@ -89,16 +94,16 @@ async def get_client_identifiers_from_effi_work(client_id: str) -> Dict[str, Any
                 
                 return {
                     "client_id": data.get("folder", client_id).lower(),
-                    "domains": context.get("domains", []),
+                    "domains": domains,
                     "contact_emails": contact_emails,
-                    "source": "effi-clients"
+                    "source": "effi-core"
                 }
             
             return {
                 "client_id": None,
                 "domains": [],
                 "contact_emails": [],
-                "source": "effi-clients-empty-response"
+                "source": "effi-core-empty-response"
             }
             
     except FileNotFoundError:
@@ -106,27 +111,27 @@ async def get_client_identifiers_from_effi_work(client_id: str) -> Dict[str, Any
             "client_id": None,
             "domains": [],
             "contact_emails": [],
-            "source": "effi-clients-not-found"
+            "source": "effi-core-not-found"
         }
     except Exception as e:
         return {
             "client_id": None,
             "domains": [],
             "contact_emails": [],
-            "source": f"effi-clients-error: {str(e)}"
+            "source": f"effi-core-error: {str(e)}"
         }
 
 
 async def get_all_clients_from_effi_work() -> List[Dict[str, Any]]:
-    """Get all clients from effi-clients via MCP.
+    """Get all clients from effi-core via MCP.
     
-    Note: Function name kept for backwards compatibility, but now uses effi-clients.
+    Note: Function name kept for backwards compatibility, but now uses effi-core.
     
     Returns:
         List of client dicts with client_id, name, domains, contact_emails
     """
     try:
-        async with get_effi_clients_session() as session:
+        async with get_effi_core_session() as session:
             result = await session.call_tool("get_all_clients", {})
             
             if result.content and len(result.content) > 0:
@@ -140,7 +145,7 @@ async def get_all_clients_from_effi_work() -> List[Dict[str, Any]]:
 
 
 async def find_client_by_email_domain(domain: str) -> Optional[Dict[str, Any]]:
-    """Find which client an email domain belongs to via effi-clients MCP.
+    """Find which client an email domain belongs to via effi-core MCP.
     
     Args:
         domain: Email domain to look up
@@ -149,7 +154,7 @@ async def find_client_by_email_domain(domain: str) -> Optional[Dict[str, Any]]:
         Client dict if found, None otherwise
     """
     try:
-        async with get_effi_clients_session() as session:
+        async with get_effi_core_session() as session:
             result = await session.call_tool(
                 "find_client_by_email",
                 {"domain": domain}

@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local/Archive
+_archive/
+*.bak
+
+# Data files (keep domain_categories.json tracked)
+*.db
+
+# Downloaded attachments (client-specific)
+attachments/
+
+# OS
+.DS_Store
+Thumbs.db
