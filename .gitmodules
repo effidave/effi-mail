@@ -1,0 +1,3 @@
+[submodule ".github"]
+	path = .github
+	url = https://github.com/effidave/effi-shared-github.git
