@@ -20,7 +20,9 @@ async def get_emails_by_client(
     Searches by client domains and contact emails from effi-core.
     
     Args:
-        client_id: Client identifier (looked up from effi-core)
+        client_id: Client identifier - must match exactly as stored in effi-core
+            (e.g., "Policy in Practice Ltd" not "Policy in Practice").
+            Use list_dms_clients to find the exact client name if unsure.
         days: Days to look back (default: 30)
         date_from: Start date (YYYY-MM-DD), overrides days
         date_to: End date (YYYY-MM-DD)
@@ -36,7 +38,11 @@ async def get_emails_by_client(
     # Get client identifiers from effi-core (fresh data)
     identifiers = await get_client_identifiers_from_effi_work(client_id)
     if not identifiers.get("domains"):
-        return json.dumps({"error": f"Client not found: {client_id}", "source": identifiers.get("source")})
+        return json.dumps({
+            "error": f"Client not found: {client_id}",
+            "source": identifiers.get("source"),
+            "hint": "Use list_dms_clients to find the exact client name. Client names often include 'Ltd', 'Limited', etc."
+        })
     
     # Search Outlook directly
     emails = outlook.search_outlook_by_identifiers(
