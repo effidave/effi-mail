@@ -119,3 +119,30 @@ def get_email_by_id(
         return json.dumps(result, indent=2)
     else:
         return json.dumps({"error": f"Email not found: {email_id}"})
+
+
+def download_attachment(
+    email_id: str,
+    attachment_name: str,
+    save_path: Optional[str] = None
+) -> str:
+    """Download an attachment from an email and save it to disk.
+    
+    Use this to retrieve documents from emails for a matter workspace.
+    If save_path is not provided, saves to ./attachments/{domain}/{date}/{filename}.
+    
+    Args:
+        email_id: The Outlook EntryID of the email (from get_email_by_id or search results)
+        attachment_name: The exact filename of the attachment to download
+        save_path: Optional absolute path where to save the file. 
+                   Include the filename, e.g. "C:/workspace/client/matter/document.docx"
+        
+    Returns:
+        JSON string with success status, file_path, file_size, and content_type
+    """
+    result = outlook.download_attachment(
+        email_id=email_id,
+        attachment_name=attachment_name,
+        save_path=save_path
+    )
+    return json.dumps(result, indent=2)

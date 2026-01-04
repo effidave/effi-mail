@@ -7,6 +7,7 @@ from effi_mail.tools.email_retrieval import (
     get_pending_emails,
     get_inbox_emails_by_domain,
     get_email_by_id,
+    download_attachment,
 )
 from effi_mail.tools.triage import (
     triage_email,
@@ -34,6 +35,7 @@ __all__ = [
     "get_pending_emails",
     "get_inbox_emails_by_domain",
     "get_email_by_id",
+    "download_attachment",
     # Triage
     "triage_email",
     "batch_triage",

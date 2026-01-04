@@ -8,6 +8,7 @@ from effi_mail.tools import (
     get_pending_emails,
     get_inbox_emails_by_domain,
     get_email_by_id,
+    download_attachment,
     # Triage
     triage_email,
     batch_triage,
@@ -34,6 +35,7 @@ mcp = FastMCP("effi-mail")
 mcp.tool()(get_pending_emails)
 mcp.tool()(get_inbox_emails_by_domain)
 mcp.tool()(get_email_by_id)
+mcp.tool()(download_attachment)
 
 # Register triage tools
 mcp.tool()(triage_email)
