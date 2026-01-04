@@ -12,15 +12,7 @@ from domain_categories import (
 
 
 def get_uncategorized_domains(days: int = 30, limit: int = 20) -> str:
-    """Get list of domains that haven't been categorized yet.
-    
-    Args:
-        days: Days to look back (default: 30)
-        limit: Maximum domains to return (default: 20)
-        
-    Returns:
-        JSON string with uncategorized domains and email counts
-    """
+    """Get domains without a category, with email counts."""
     # Scan ALL emails in date range for uncategorized domains (no limit)
     result = outlook.get_domain_counts(days=days, limit=None, pending_only=False)
     
@@ -45,29 +37,13 @@ def get_uncategorized_domains(days: int = 30, limit: int = 20) -> str:
 
 
 def categorize_domain(domain: str, category: str) -> str:
-    """Set the category for a sender domain.
-    
-    Saves to domain_categories.json.
-    
-    Args:
-        domain: Domain name
-        category: Category to assign - 'Client', 'Internal', 'Marketing', 'Personal', or 'Spam'
-        
-    Returns:
-        JSON string with success status
-    """
+    """Set domain category (case-insensitive): Client, Internal, Marketing, Personal, or Spam."""
     set_domain_category(domain, category)
     return json.dumps({"success": True, "domain": domain, "category": category})
 
 
 def get_domain_summary() -> str:
-    """Get summary of all domains grouped by category.
-    
-    Reads from domain_categories.json.
-    
-    Returns:
-        JSON string with domains grouped by category
-    """
+    """Get all domains grouped by category."""
     all_categories = get_all_domain_categories()
     
     # Group by category

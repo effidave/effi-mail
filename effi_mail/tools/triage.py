@@ -7,17 +7,7 @@ from effi_mail.helpers import outlook
 
 
 def triage_email(email_id: str, status: str) -> str:
-    """Assign triage status to an email using Outlook categories.
-    
-    Status is stored in the email itself as an Outlook category.
-    
-    Args:
-        email_id: Email EntryID
-        status: Triage status - 'processed', 'deferred', or 'archived'
-        
-    Returns:
-        JSON string with success/error status
-    """
+    """Set triage status ('processed', 'deferred', 'archived') on an email."""
     success = outlook.set_triage_status(email_id, status)
     if success:
         return json.dumps({"success": True, "email_id": email_id, "status": status})
@@ -25,15 +15,7 @@ def triage_email(email_id: str, status: str) -> str:
 
 
 def batch_triage(email_ids: List[str], status: str) -> str:
-    """Triage multiple emails at once with the same status.
-    
-    Args:
-        email_ids: List of email EntryIDs
-        status: Triage status to apply - 'processed', 'deferred', or 'archived'
-        
-    Returns:
-        JSON string with count of successful/failed operations
-    """
+    """Triage multiple emails with the same status."""
     results = outlook.batch_set_triage_status(email_ids, status)
     
     return json.dumps({
@@ -45,17 +27,7 @@ def batch_triage(email_ids: List[str], status: str) -> str:
 
 
 def batch_archive_domain(domain: str, days: int = 30) -> str:
-    """Archive all pending emails from a specific domain.
-    
-    Useful for marketing emails. Gets pending emails from Outlook and archives them.
-    
-    Args:
-        domain: Domain to archive all emails from
-        days: Days to look back (default: 30)
-        
-    Returns:
-        JSON string with count of archived emails
-    """
+    """Archive all pending emails from a domain. Useful for marketing cleanup."""
     # Get pending emails from this domain
     pending_emails = outlook.get_pending_emails_from_domain(domain, days=days)
     

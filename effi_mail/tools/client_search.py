@@ -15,22 +15,7 @@ async def get_emails_by_client(
     date_to: Optional[str] = None,
     limit: int = 100
 ) -> str:
-    """Get all email correspondence with a client from Outlook.
-    
-    Searches by client domains and contact emails from effi-core.
-    
-    Args:
-        client_id: Client identifier - must match exactly as stored in effi-core
-            (e.g., "Policy in Practice Ltd" not "Policy in Practice").
-            Use list_dms_clients to find the exact client name if unsure.
-        days: Days to look back (default: 30)
-        date_from: Start date (YYYY-MM-DD), overrides days
-        date_to: End date (YYYY-MM-DD)
-        limit: Maximum results (default: 100)
-        
-    Returns:
-        JSON string with client emails
-    """
+    """Get client correspondence. client_id is case-insensitive."""
     # Parse dates
     # date_from: start of day (00:00:00)
     # date_to: end of day (23:59:59) to include all emails on that date
@@ -79,26 +64,7 @@ def search_outlook_direct(
     folder: str = "Inbox",
     limit: int = 50
 ) -> str:
-    """Query Outlook directly with flexible filters.
-    
-    For ad-hoc historical searches.
-    
-    Args:
-        sender_domain: Filter by sender's domain
-        sender_email: Filter by exact sender email
-        recipient_domain: Filter by recipient domain
-        recipient_email: Filter by exact recipient email
-        subject_contains: Subject contains text
-        body_contains: Body contains text
-        date_from: Start date (YYYY-MM-DD)
-        date_to: End date (YYYY-MM-DD)
-        days: Days to look back (default: 30)
-        folder: Outlook folder - 'Inbox' or 'Sent Items' (default: 'Inbox')
-        limit: Maximum results (default: 50)
-        
-    Returns:
-        JSON string with matching emails
-    """
+    """Search Outlook with filters. folder: 'Inbox' or 'Sent Items'. Dates: YYYY-MM-DD."""
     # Parse dates
     # date_from: start of day (00:00:00)
     # date_to: end of day (23:59:59) to include all emails on that date

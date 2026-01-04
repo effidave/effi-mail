@@ -12,18 +12,7 @@ def get_pending_emails(
     limit: int = 100,
     category_filter: Optional[str] = None
 ) -> str:
-    """Get emails pending triage (no effi: category), grouped by domain.
-    
-    Queries Outlook directly for emails without triage status.
-    
-    Args:
-        days: Days to look back (default: 30)
-        limit: Maximum emails to return (default: 100)
-        category_filter: Filter by domain category: Client, Internal, Marketing, Personal, Uncategorized
-        
-    Returns:
-        JSON string with pending emails grouped by domain
-    """
+    """Get untriaged emails grouped by domain. Filter by category: Client, Internal, Marketing, Personal, Uncategorized."""
     # Query Outlook directly for pending emails (no effi: category)
     result = outlook.get_pending_emails(days=days, limit=limit, group_by_domain=True)
     
@@ -66,15 +55,7 @@ def get_pending_emails(
 
 
 def get_inbox_emails_by_domain(domain: str, limit: int = 20) -> str:
-    """Get emails from a specific sender domain (Inbox only).
-    
-    Args:
-        domain: Domain name to filter by (e.g., 'gmail.com')
-        limit: Maximum emails to return (default: 20)
-        
-    Returns:
-        JSON string with emails from the domain
-    """
+    """Get Inbox emails from a sender domain."""
     # Search Outlook directly for emails from this domain
     emails = outlook.search_outlook(sender_domain=domain, limit=limit)
     return json.dumps({
@@ -91,19 +72,7 @@ def get_email_by_id(
     include_attachments: bool = True,
     max_body_length: Optional[int] = None
 ) -> str:
-    """Get full email details by ID.
-    
-    Accepts EntryID or internet_message_id (auto-detected).
-    
-    Args:
-        email_id: Email ID - either Outlook EntryID or internet_message_id (format: <...@...>)
-        include_body: Include full email body (default: True)
-        include_attachments: Include attachment metadata (default: True)
-        max_body_length: Truncate body to this length (default: None = no truncation)
-        
-    Returns:
-        JSON string with email details
-    """
+    """Get full email by EntryID or internet_message_id (auto-detected)."""
     # Get email directly from Outlook
     full_email = outlook.get_email_full(email_id)
     
@@ -126,20 +95,7 @@ def download_attachment(
     attachment_name: str,
     save_path: Optional[str] = None
 ) -> str:
-    """Download an attachment from an email and save it to disk.
-    
-    Use this to retrieve documents from emails for a matter workspace.
-    If save_path is not provided, saves to ./attachments/{domain}/{date}/{filename}.
-    
-    Args:
-        email_id: The Outlook EntryID of the email (from get_email_by_id or search results)
-        attachment_name: The exact filename of the attachment to download
-        save_path: Optional absolute path where to save the file. 
-                   Include the filename, e.g. "C:/workspace/client/matter/document.docx"
-        
-    Returns:
-        JSON string with success status, file_path, file_size, and content_type
-    """
+    """Download attachment to save_path or ./attachments/{domain}/{date}/{filename}."""
     result = outlook.download_attachment(
         email_id=email_id,
         attachment_name=attachment_name,

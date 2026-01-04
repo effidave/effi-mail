@@ -8,13 +8,7 @@ from effi_mail.helpers import outlook, format_email_summary
 
 
 def list_dms_clients() -> str:
-    """List all client folders in DMSforLegal.
-    
-    Returns folder names as stored in DMS.
-    
-    Returns:
-        JSON string with client list
-    """
+    """List all client folders in DMSforLegal."""
     clients = outlook.list_dms_clients()
     return json.dumps({
         "count": len(clients),
@@ -23,16 +17,7 @@ def list_dms_clients() -> str:
 
 
 def list_dms_matters(client: str) -> str:
-    """List all matter folders for a client in DMSforLegal.
-    
-    Returns folder names including matter IDs.
-    
-    Args:
-        client: Client folder name (exact match)
-        
-    Returns:
-        JSON string with matter list
-    """
+    """List matter folders for a client in DMSforLegal."""
     if not client:
         return json.dumps({"error": "client parameter is required"})
     
@@ -45,16 +30,7 @@ def list_dms_matters(client: str) -> str:
 
 
 def get_dms_emails(client: str, matter: str, limit: int = 50) -> str:
-    """Get emails filed under a specific client/matter in DMSforLegal.
-    
-    Args:
-        client: Client folder name
-        matter: Matter folder name
-        limit: Maximum emails to return (default: 50)
-        
-    Returns:
-        JSON string with filed emails
-    """
+    """Get emails filed under a client/matter in DMSforLegal."""
     if not client or not matter:
         return json.dumps({"error": "client and matter parameters are required"})
     
@@ -75,21 +51,7 @@ def search_dms(
     date_to: Optional[str] = None,
     limit: int = 50
 ) -> str:
-    """Search emails across DMSforLegal with filters.
-    
-    Can search all clients/matters or filter by specific ones.
-    
-    Args:
-        client: Filter by client folder name (optional - searches all if not provided)
-        matter: Filter by matter folder name (requires client)
-        subject_contains: Filter by subject text
-        date_from: Start date (YYYY-MM-DD)
-        date_to: End date (YYYY-MM-DD)
-        limit: Maximum results (default: 50)
-        
-    Returns:
-        JSON string with matching emails
-    """
+    """Search emails in DMSforLegal. Dates are YYYY-MM-DD format."""
     # Parse dates
     # date_from: start of day (00:00:00)
     # date_to: end of day (23:59:59) to include all emails on that date
