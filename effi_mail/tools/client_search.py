@@ -1,7 +1,7 @@
 """Client search tools for effi-mail MCP server."""
 
 import json
-from datetime import datetime
+from datetime import datetime, time
 from typing import Optional
 
 from effi_mail.helpers import outlook, format_email_summary
@@ -32,8 +32,12 @@ async def get_emails_by_client(
         JSON string with client emails
     """
     # Parse dates
+    # date_from: start of day (00:00:00)
+    # date_to: end of day (23:59:59) to include all emails on that date
     date_from_dt = datetime.strptime(date_from, "%Y-%m-%d") if date_from else None
-    date_to_dt = datetime.strptime(date_to, "%Y-%m-%d") if date_to else None
+    date_to_dt = datetime.combine(
+        datetime.strptime(date_to, "%Y-%m-%d").date(), time(23, 59, 59)
+    ) if date_to else None
     
     # Get client identifiers from effi-core (fresh data)
     identifiers = await get_client_identifiers_from_effi_work(client_id)
@@ -96,8 +100,12 @@ def search_outlook_direct(
         JSON string with matching emails
     """
     # Parse dates
+    # date_from: start of day (00:00:00)
+    # date_to: end of day (23:59:59) to include all emails on that date
     date_from_dt = datetime.strptime(date_from, "%Y-%m-%d") if date_from else None
-    date_to_dt = datetime.strptime(date_to, "%Y-%m-%d") if date_to else None
+    date_to_dt = datetime.combine(
+        datetime.strptime(date_to, "%Y-%m-%d").date(), time(23, 59, 59)
+    ) if date_to else None
     
     emails = outlook.search_outlook(
         sender_domain=sender_domain,
