@@ -28,6 +28,8 @@ from effi_mail.tools.dms import (
     list_dms_matters,
     get_dms_emails,
     search_dms,
+    file_email_to_dms,
+    batch_file_emails_to_dms,
 )
 
 __all__ = [
@@ -52,4 +54,6 @@ __all__ = [
     "list_dms_matters",
     "get_dms_emails",
     "search_dms",
+    "file_email_to_dms",
+    "batch_file_emails_to_dms",
 ]

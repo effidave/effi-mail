@@ -1446,3 +1446,225 @@ class OutlookClient:
                     continue
         
         return results
+
+    def file_email_to_dms(
+        self,
+        email_id: str,
+        client_name: str,
+        matter_name: str,
+    ) -> Dict[str, Any]:
+        """File an email to a DMS client/matter folder.
+        
+        Copies the email to the matter's Emails folder, adds "Filed" category
+        to the original, and marks it as effi:processed.
+        
+        Args:
+            email_id: EntryID of the email to file
+            client_name: Client folder name in DMS
+            matter_name: Matter folder name under the client
+            
+        Returns:
+            Dict with:
+            - success: bool
+            - filed_entry_id: EntryID of the filed copy (if successful)
+            - subject: Email subject
+            - received_time: Email received time (ISO format)
+            - filed_category: "Filed"
+            - triage_status: "processed"
+            - error: Error message (if failed)
+        """
+        self._ensure_connection()
+        
+        # Validate DMS folder exists
+        dms_path = f"{self.DMS_ROOT_FOLDER}\\{client_name}\\{matter_name}\\{self.DMS_EMAILS_FOLDER}"
+        emails_folder = self._get_folder_by_path(dms_path)
+        
+        if not emails_folder:
+            # Determine which part is missing for better error message
+            client_path = f"{self.DMS_ROOT_FOLDER}\\{client_name}"
+            client_folder = self._get_folder_by_path(client_path)
+            
+            if not client_folder:
+                return {
+                    "success": False,
+                    "error": f"Client '{client_name}' not found in DMS"
+                }
+            
+            matter_path = f"{self.DMS_ROOT_FOLDER}\\{client_name}\\{matter_name}"
+            matter_folder = self._get_folder_by_path(matter_path)
+            
+            if not matter_folder:
+                return {
+                    "success": False,
+                    "error": f"Matter '{matter_name}' not found for client '{client_name}'"
+                }
+            
+            return {
+                "success": False,
+                "error": f"Emails folder not found for matter '{matter_name}'. Please create the Emails subfolder in DMS."
+            }
+        
+        # Get the email to file
+        try:
+            message = self._namespace.GetItemFromID(email_id)
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Email not found: {str(e)}"
+            }
+        
+        # Copy email to DMS
+        try:
+            copied = message.Copy()
+            filed_message = copied.Move(emails_folder)
+            filed_entry_id = filed_message.EntryID
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to copy email to DMS: {str(e)}"
+            }
+        
+        # Add "Filed" category and effi:processed to original
+        try:
+            existing_categories = message.Categories or ""
+            categories = [c.strip() for c in existing_categories.split(",") if c.strip()]
+            
+            # Remove any existing effi: triage categories
+            categories = [c for c in categories if not c.startswith(self.TRIAGE_CATEGORY_PREFIX)]
+            
+            # Add Filed and effi:processed
+            if "Filed" not in categories:
+                categories.append("Filed")
+            categories.append(self.TRIAGE_CATEGORIES["processed"])
+            
+            message.Categories = ", ".join(categories)
+            message.Save()
+        except Exception as e:
+            # Email was filed but category update failed - still report success
+            return {
+                "success": True,
+                "filed_entry_id": filed_entry_id,
+                "subject": message.Subject,
+                "received_time": message.ReceivedTime.isoformat() if hasattr(message.ReceivedTime, 'isoformat') else str(message.ReceivedTime),
+                "filed_category": "Filed",
+                "triage_status": "processed",
+                "warning": f"Filed successfully but failed to update categories: {str(e)}"
+            }
+        
+        return {
+            "success": True,
+            "filed_entry_id": filed_entry_id,
+            "subject": message.Subject,
+            "received_time": message.ReceivedTime.isoformat() if hasattr(message.ReceivedTime, 'isoformat') else str(message.ReceivedTime),
+            "filed_category": "Filed",
+            "triage_status": "processed"
+        }
+
+    def batch_file_emails_to_dms(
+        self,
+        email_ids: List[str],
+        client_name: str,
+        matter_name: str,
+    ) -> Dict[str, Any]:
+        """File multiple emails to a DMS client/matter folder.
+        
+        Validates the DMS folder once upfront, then files each email.
+        Continues processing if individual emails fail.
+        
+        Args:
+            email_ids: List of EntryIDs to file
+            client_name: Client folder name in DMS
+            matter_name: Matter folder name under the client
+            
+        Returns:
+            Dict with:
+            - success: bool (True if folder validation passed)
+            - filed_count: Number of emails successfully filed
+            - failed_count: Number of emails that failed
+            - filed_emails: List of {entry_id, subject, received_time}
+            - failed_emails: List of {email_id, error}
+            - error: Error message (if folder validation failed)
+        """
+        self._ensure_connection()
+        
+        # Handle empty list
+        if not email_ids:
+            return {
+                "success": True,
+                "filed_count": 0,
+                "failed_count": 0,
+                "filed_emails": [],
+                "failed_emails": []
+            }
+        
+        # Validate DMS folder exists upfront
+        dms_path = f"{self.DMS_ROOT_FOLDER}\\{client_name}\\{matter_name}\\{self.DMS_EMAILS_FOLDER}"
+        emails_folder = self._get_folder_by_path(dms_path)
+        
+        if not emails_folder:
+            # Determine which part is missing for better error message
+            client_path = f"{self.DMS_ROOT_FOLDER}\\{client_name}"
+            client_folder = self._get_folder_by_path(client_path)
+            
+            if not client_folder:
+                return {
+                    "success": False,
+                    "error": f"Client '{client_name}' not found in DMS"
+                }
+            
+            matter_path = f"{self.DMS_ROOT_FOLDER}\\{client_name}\\{matter_name}"
+            matter_folder = self._get_folder_by_path(matter_path)
+            
+            if not matter_folder:
+                return {
+                    "success": False,
+                    "error": f"Matter '{matter_name}' not found for client '{client_name}'"
+                }
+            
+            return {
+                "success": False,
+                "error": f"Emails folder not found for matter '{matter_name}'. Please create the Emails subfolder in DMS."
+            }
+        
+        filed_emails = []
+        failed_emails = []
+        
+        for email_id in email_ids:
+            try:
+                message = self._namespace.GetItemFromID(email_id)
+                
+                # Copy to DMS
+                copied = message.Copy()
+                filed_message = copied.Move(emails_folder)
+                
+                # Add categories to original
+                existing_categories = message.Categories or ""
+                categories = [c.strip() for c in existing_categories.split(",") if c.strip()]
+                categories = [c for c in categories if not c.startswith(self.TRIAGE_CATEGORY_PREFIX)]
+                
+                if "Filed" not in categories:
+                    categories.append("Filed")
+                categories.append(self.TRIAGE_CATEGORIES["processed"])
+                
+                message.Categories = ", ".join(categories)
+                message.Save()
+                
+                filed_emails.append({
+                    "entry_id": filed_message.EntryID,
+                    "subject": message.Subject,
+                    "received_time": message.ReceivedTime.isoformat() if hasattr(message.ReceivedTime, 'isoformat') else str(message.ReceivedTime)
+                })
+                
+            except Exception as e:
+                failed_emails.append({
+                    "email_id": email_id,
+                    "error": str(e)
+                })
+        
+        return {
+            "success": True,
+            "filed_count": len(filed_emails),
+            "failed_count": len(failed_emails),
+            "filed_emails": filed_emails,
+            "failed_emails": failed_emails
+        }

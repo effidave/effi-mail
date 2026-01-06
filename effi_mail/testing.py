@@ -24,6 +24,8 @@ from effi_mail.tools import (
     list_dms_matters as _list_dms_matters,
     get_dms_emails as _get_dms_emails,
     search_dms as _search_dms,
+    file_email_to_dms as _file_email_to_dms,
+    batch_file_emails_to_dms as _batch_file_emails_to_dms,
 )
 
 
@@ -223,6 +225,32 @@ async def list_tools() -> List[Tool]:
                 }
             }
         ),
+        Tool(
+            name="file_email_to_dms",
+            description="File an email to a DMS client/matter folder.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "email_id": {"type": "string"},
+                    "client": {"type": "string"},
+                    "matter": {"type": "string"}
+                },
+                "required": ["email_id", "client", "matter"]
+            }
+        ),
+        Tool(
+            name="batch_file_emails_to_dms",
+            description="File multiple emails to a DMS client/matter folder.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "email_ids": {"type": "array", "items": {"type": "string"}},
+                    "client": {"type": "string"},
+                    "matter": {"type": "string"}
+                },
+                "required": ["email_ids", "client", "matter"]
+            }
+        ),
     ]
 
 
@@ -352,6 +380,22 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 date_from=arguments.get("date_from"),
                 date_to=arguments.get("date_to"),
                 limit=arguments.get("limit", 50)
+            )
+            return [TextContent(type="text", text=result)]
+        
+        elif name == "file_email_to_dms":
+            result = _file_email_to_dms(
+                email_id=arguments.get("email_id"),
+                client=arguments.get("client"),
+                matter=arguments.get("matter")
+            )
+            return [TextContent(type="text", text=result)]
+        
+        elif name == "batch_file_emails_to_dms":
+            result = _batch_file_emails_to_dms(
+                email_ids=arguments.get("email_ids", []),
+                client=arguments.get("client"),
+                matter=arguments.get("matter")
             )
             return [TextContent(type="text", text=result)]
         

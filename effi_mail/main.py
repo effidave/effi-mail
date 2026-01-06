@@ -25,6 +25,8 @@ from effi_mail.tools import (
     list_dms_matters,
     get_dms_emails,
     search_dms,
+    file_email_to_dms,
+    batch_file_emails_to_dms,
 )
 
 
@@ -56,6 +58,8 @@ mcp.tool()(list_dms_clients)
 mcp.tool()(list_dms_matters)
 mcp.tool()(get_dms_emails)
 mcp.tool()(search_dms)
+mcp.tool()(file_email_to_dms)
+mcp.tool()(batch_file_emails_to_dms)
 
 
 def run_server():
