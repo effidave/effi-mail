@@ -7,7 +7,7 @@ inbox = namespace.GetDefaultFolder(6)
 
 cutoff = datetime.now() - timedelta(days=30)
 messages = inbox.Items
-date_filter = f"[ReceivedTime] >= '{cutoff.strftime('%m/%d/%Y %H:%M %p')}'"
+date_filter = f"[ReceivedTime] >= '{cutoff.strftime('%d/%m/%Y %H:%M')}'"
 filtered = messages.Restrict(date_filter)
 
 emails = []

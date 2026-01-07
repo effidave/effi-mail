@@ -1,7 +1,7 @@
 """Tests for triage status via Outlook categories.
 
 These tests verify that triage status is stored as Outlook categories
-(effi:processed, effi:deferred, effi:archived) rather than in a database.
+(effi:action, effi:waiting, effi:processed, effi:archived) rather than in a database.
 """
 
 import pytest
@@ -60,16 +60,18 @@ class TestTriageCategoryConstants:
         """All triage statuses should have corresponding categories."""
         categories = OutlookClient.TRIAGE_CATEGORIES
         
+        assert "action" in categories
+        assert "waiting" in categories
         assert "processed" in categories
-        assert "deferred" in categories
         assert "archived" in categories
     
     def test_triage_category_values(self):
         """Triage category values should use effi: prefix."""
         categories = OutlookClient.TRIAGE_CATEGORIES
         
+        assert categories["action"] == "effi:action"
+        assert categories["waiting"] == "effi:waiting"
         assert categories["processed"] == "effi:processed"
-        assert categories["deferred"] == "effi:deferred"
         assert categories["archived"] == "effi:archived"
 
 
@@ -88,12 +90,20 @@ class TestSetTriageStatus:
         assert "effi:processed" in mock_outlook_message.Categories
         mock_outlook_message.Save.assert_called_once()
     
-    def test_set_triage_status_deferred(self, outlook_client, mock_outlook_message):
-        """Should add effi:deferred category to email."""
-        result = outlook_client.set_triage_status("test-id", "deferred")
+    def test_set_triage_status_action(self, outlook_client, mock_outlook_message):
+        """Should add effi:action category to email."""
+        result = outlook_client.set_triage_status("test-id", "action")
         
         assert result is True
-        assert "effi:deferred" in mock_outlook_message.Categories
+        assert "effi:action" in mock_outlook_message.Categories
+        mock_outlook_message.Save.assert_called_once()
+    
+    def test_set_triage_status_waiting(self, outlook_client, mock_outlook_message):
+        """Should add effi:waiting category to email."""
+        result = outlook_client.set_triage_status("test-id", "waiting")
+        
+        assert result is True
+        assert "effi:waiting" in mock_outlook_message.Categories
         mock_outlook_message.Save.assert_called_once()
     
     def test_set_triage_status_archived(self, outlook_client, mock_outlook_message):
@@ -123,13 +133,13 @@ class TestSetTriageStatus:
     
     def test_set_triage_status_replaces_existing_triage(self, outlook_client, mock_outlook_message):
         """Should replace existing triage category with new one."""
-        mock_outlook_message.Categories = "effi:deferred, Work"
+        mock_outlook_message.Categories = "effi:action, Work"
         
         outlook_client.set_triage_status("test-id", "processed")
         
         categories = mock_outlook_message.Categories
         assert "effi:processed" in categories
-        assert "effi:deferred" not in categories
+        assert "effi:action" not in categories
         assert "Work" in categories
     
     def test_set_triage_status_handles_empty_categories(self, outlook_client, mock_outlook_message):
@@ -166,13 +176,21 @@ class TestGetTriageStatus:
         
         assert result == "processed"
     
-    def test_get_triage_status_deferred(self, outlook_client, mock_outlook_message):
-        """Should return 'deferred' when email has effi:deferred category."""
-        mock_outlook_message.Categories = "Important, effi:deferred"
+    def test_get_triage_status_action(self, outlook_client, mock_outlook_message):
+        """Should return 'action' when email has effi:action category."""
+        mock_outlook_message.Categories = "Important, effi:action"
         
         result = outlook_client.get_triage_status("test-id")
         
-        assert result == "deferred"
+        assert result == "action"
+    
+    def test_get_triage_status_waiting(self, outlook_client, mock_outlook_message):
+        """Should return 'waiting' when email has effi:waiting category."""
+        mock_outlook_message.Categories = "Important, effi:waiting"
+        
+        result = outlook_client.get_triage_status("test-id")
+        
+        assert result == "waiting"
     
     def test_get_triage_status_archived(self, outlook_client, mock_outlook_message):
         """Should return 'archived' when email has effi:archived category."""
@@ -226,7 +244,7 @@ class TestClearTriageStatus:
     
     def test_clear_triage_status_preserves_other_categories(self, outlook_client, mock_outlook_message):
         """Should preserve non-triage categories."""
-        mock_outlook_message.Categories = "Important, effi:deferred, Work"
+        mock_outlook_message.Categories = "Important, effi:action, Work"
         
         outlook_client.clear_triage_status("test-id")
         

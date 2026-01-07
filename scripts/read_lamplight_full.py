@@ -9,7 +9,7 @@ def get_lamplight_emails_full():
         inbox = namespace.GetDefaultFolder(6)
         
         cutoff_date = datetime.now() - timedelta(days=30)
-        cutoff_str = cutoff_date.strftime("%m/%d/%Y %H:%M %p")
+        cutoff_str = cutoff_date.strftime("%d/%m/%Y %H:%M")
         
         messages = inbox.Items
         date_filter = f"[ReceivedTime] >= '{cutoff_str}'"

@@ -38,7 +38,7 @@ effi-mail uses a **database-free architecture** built on **FastMCP** for tool re
 
 2. **No SQLite Database**: Previously, emails were synced to a local database. This created sync issues and stale data. Now all queries go directly to Outlook.
 
-3. **Triage via Outlook Categories**: Triage status (`processed`, `deferred`, `archived`) is stored as Outlook categories on the emails themselves. This persists across devices and survives Outlook reinstalls.
+3. **Triage via Outlook Categories**: Triage status (`action`, `waiting`, `processed`, `archived`) is stored as Outlook categories on the emails themselves. This persists across devices and survives Outlook reinstalls.
 
 4. **Domain Categories in JSON**: Domain categorization (Client, Marketing, Personal, Internal, Spam) is stored in `domain_categories.json` for simplicity and easy editing.
 
@@ -68,9 +68,10 @@ Triage status is stored directly on emails using Outlook categories.
 ```python
 TRIAGE_CATEGORY_PREFIX = "effi:"
 TRIAGE_CATEGORIES = {
-    "processed": "effi:processed",
-    "deferred": "effi:deferred", 
-    "archived": "effi:archived"
+    "action": "effi:action",        # I need to do something
+    "waiting": "effi:waiting",      # Ball in someone else's court
+    "processed": "effi:processed",  # Dealt with, linked to matter
+    "archived": "effi:archived",    # Reference only, no action needed
 }
 ```
 
@@ -262,7 +263,7 @@ Tools are organized into 5 modules under `effi_mail/tools/`. There are 17 tools 
 ### Triage (`tools/triage.py`)
 | Tool | Description |
 |------|-------------|
-| `triage_email` | Mark single email as processed/deferred/archived |
+| `triage_email` | Mark single email as action/waiting/processed/archived |
 | `batch_triage` | Mark multiple emails with same status |
 | `batch_archive_domain` | Archive all pending emails from a domain |
 
@@ -406,8 +407,9 @@ Triage status is stored as Outlook categories directly on emails:
 
 | Status | Category Name |
 |--------|---------------|
+| Action Required | `effi:action` |
+| Awaiting Reply | `effi:waiting` |
 | Processed | `effi:processed` |
-| Deferred | `effi:deferred` |
 | Archived | `effi:archived` |
 | Pending | (no effi: category) |
 

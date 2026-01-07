@@ -36,10 +36,11 @@ class EmailCategory(Enum):
 
 class TriageStatus(Enum):
     """Triage status for emails."""
-    PENDING = "pending"
-    PROCESSED = "processed"
-    DEFERRED = "deferred"
-    ARCHIVED = "archived"
+    PENDING = "pending"          # New email, needs review
+    ACTION_REQUIRED = "action"   # I need to do something
+    AWAITING_REPLY = "waiting"   # Ball in someone else's court
+    PROCESSED = "processed"      # Dealt with, linked to matter
+    ARCHIVED = "archived"        # Reference only, no action needed
 
 
 class EmailDirection(Enum):

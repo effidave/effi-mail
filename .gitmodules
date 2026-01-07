@@ -1,6 +1,0 @@
-[submodule ".github"]
-	path = .github
-	url = https://github.com/effidave/effi-shared-github.git
-[submodule ".vscode"]
-	path = .vscode
-	url = https://github.com/effidave/effi-shared-vscode.git

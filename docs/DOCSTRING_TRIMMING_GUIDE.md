@@ -39,7 +39,7 @@ If the parameter name is clear, don't explain it:
 ### Enum/allowed values
 Agents will guess wrong without these:
 ```python
-"""Set triage status ('processed', 'deferred', 'archived')."""
+"""Set triage status ('action', 'waiting', 'processed', 'archived')."""
 """Category: Client, Internal, Marketing, Personal, or Spam."""
 ```
 
@@ -86,7 +86,7 @@ def triage_email(email_id: str, status: str) -> str:
     
     Args:
         email_id: Email EntryID
-        status: Triage status - 'processed', 'deferred', or 'archived'
+        status: Triage status - 'action', 'waiting', 'processed', or 'archived'
         
     Returns:
         JSON string with success/error status
@@ -96,7 +96,7 @@ def triage_email(email_id: str, status: str) -> str:
 ### After (trimmed)
 ```python
 def triage_email(email_id: str, status: str) -> str:
-    """Set triage status ('processed', 'deferred', 'archived') on an email."""
+    """Set triage status ('action', 'waiting', 'processed', 'archived') on an email."""
 ```
 
 ## Checklist

@@ -5,7 +5,7 @@ MCP server for Outlook email management with triage workflow, built with [FastMC
 ## Features
 
 - **Direct Outlook Access**: Fetch emails from Outlook via Windows COM
-- **Triage via Categories**: Triage status stored as Outlook categories (effi:processed, effi:deferred, effi:archived)
+- **Triage via Categories**: Triage status stored as Outlook categories (effi:action, effi:waiting, effi:processed, effi:archived)
 - **Domain Categorization**: Classify sender domains as Client, Internal, Marketing, Personal, or Spam (stored in domain_categories.json)
 - **Client Search**: Search emails by client using domains from effi-clients MCP server
 - **Batch Operations**: Archive marketing emails, process multiple emails at once
@@ -97,12 +97,115 @@ Read-only access to emails filed in the DMSforLegal Outlook store.
 
 **DMS folder structure**: `\\DMSforLegal\_My Matters\{Client}\{Matter}\Emails`
 
+## Auto-File for Large Results
+
+To reduce memory usage in long chat sessions, tools that return potentially large payloads automatically save results to a cache file when the count exceeds a threshold.
+
+### Behaviour
+
+| Result Count | Action |
+|--------------|--------|
+| ≤ 20 items | Return inline (as before) |
+| > 20 items | Save to `~/.effi/cache/{prefix}_{timestamp}.json`, return 5-item preview + `full_data_file` path |
+
+### Override Parameters
+
+All search/retrieval tools support these optional parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `output_file` | string | `""` | Agent-specified path to save results (takes priority) |
+| `force_inline` | bool | `False` | Return full payload inline regardless of size |
+| `auto_file_threshold` | int | `20` | Item count above which to auto-file |
+
+### Example Response (auto-filed)
+
+```json
+{
+  "count": 87,
+  "limit_applied": 100,
+  "results_truncated": false,
+  "preview": [...5 items...],
+  "full_data_file": "C:/Users/david/.effi/cache/pending_emails_20260107_143022.json",
+  "auto_filed": true,
+  "auto_file_note": "Results (87) exceeded threshold (20). Full data saved to file."
+}
+```
+
+### Affected Tools
+
+- `get_pending_emails`
+- `get_inbox_emails_by_domain`
+- `get_sent_emails_by_domain`
+- `search_inbox_by_subject`
+- `get_emails_by_client`
+- `search_outlook_direct`
+- `scan_for_commitments`
+- `get_uncategorized_domains`
+- `get_email_thread`
+- `get_dms_emails`
+- `get_dms_admin_emails`
+- `search_dms`
+
+### Cache File Structure
+
+Auto-filed results are stored with metadata and tracking flags:
+
+```json
+{
+  "metadata": {
+    "created": "2026-01-07T14:30:22",
+    "source_tool": "get_pending_emails",
+    "total_items": 87,
+    "retrieved_count": 20,
+    "processed_count": 12
+  },
+  "items": [
+    {"id": "xxx", "subject": "...", "_retrieved": true, "_processed": false},
+    {"id": "yyy", "subject": "...", "_retrieved": false, "_processed": false}
+  ]
+}
+```
+
+### Cache Tools
+
+| Tool | Purpose |
+|------|---------|
+| `read_cache_file` | Paginate through cached results; auto-marks items as retrieved |
+| `mark_cache_processed` | Mark items as processed after taking action |
+| `get_cache_status` | Check progress (counts, percentages) |
+| `reset_cache_flags` | Reset retrieved/processed flags to reprocess |
+| `list_cache_files` | List recent cache files with status |
+
+### Cache Workflow Example
+
+```
+1. get_pending_emails() → 87 items auto-filed
+
+2. read_cache_file(path, limit=15) → next 15 unretrieved items
+   File: retrieved=15, processed=0
+   
+3. Agent archives 12 emails
+   mark_cache_processed(path, ids=["a","b","c"...])
+   File: retrieved=15, processed=12
+
+4. read_cache_file(path, limit=15) → next 15 unretrieved
+   File: retrieved=30, processed=12
+
+5. Agent interrupted, resumes later:
+   get_cache_status(path) → "87 total, 30 retrieved, 12 processed"
+   read_cache_file(path, unprocessed_only=true) → 18 retrieved-but-not-processed
+   
+6. Need to start over:
+   reset_cache_flags(path) → all flags reset to false
+```
+
 ## Workflow
 
 1. Use `get_pending_emails` to see un-triaged emails grouped by domain
 2. Use `get_uncategorized_domains` to categorize new sender domains
 3. Archive marketing emails in bulk with `batch_archive_domain`
-4. Mark individual emails as processed/deferred using `triage_email`
+4. Mark individual emails as action/waiting/processed using `triage_email`
 5. Search client emails using `search_emails_by_client`
 6. Access filed emails via DMS tools (`list_dms_clients`, `get_dms_emails`)
 

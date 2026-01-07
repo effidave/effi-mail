@@ -51,6 +51,85 @@ class OutlookClient:
                 self._outlook = win32com.client.Dispatch("Outlook.Application")
                 self._namespace = self._outlook.GetNamespace("MAPI")
     
+    def _set_recipient_domains(self, limit: int = 200) -> dict:
+        """Set RecipientDomain custom property on recent Sent Items.
+        
+        Populates a searchable field with recipient domains from To, CC, and BCC,
+        enabling DASL queries to filter sent emails by recipient domain.
+        
+        Args:
+            limit: Maximum items to process (default 200)
+            
+        Returns:
+            Dict with counts of processed/updated items
+        """
+        self._ensure_connection()
+        
+        sent_folder = self._namespace.GetDefaultFolder(self.FOLDER_SENT)
+        messages = sent_folder.Items
+        messages.Sort("[SentOn]", True)  # Most recent first
+        
+        prop_path = "http://schemas.microsoft.com/mapi/string/{00020329-0000-0000-C000-000000000046}/RecipientDomain"
+        processed = 0
+        updated = 0
+        
+        for message in messages:
+            if processed >= limit:
+                break
+            processed += 1
+            
+            try:
+                # Check if already has RecipientDomain set
+                try:
+                    existing = message.PropertyAccessor.GetProperty(prop_path)
+                    if existing:
+                        continue  # Already set, skip
+                except:
+                    pass  # Property doesn't exist yet
+                
+                # Extract recipient domains from To, CC, and BCC
+                domains = set()
+                for recipient in message.Recipients:
+                    try:
+                        # Recipients collection includes To, CC, and BCC
+                        email = self._get_recipient_email(recipient)
+                        if email and "@" in email:
+                            domain = email.split("@")[-1].lower()
+                            domains.add(domain)
+                    except:
+                        continue
+                
+                if domains:
+                    domain_str = ";".join(sorted(domains))
+                    message.PropertyAccessor.SetProperty(prop_path, domain_str)
+                    message.Save()
+                    updated += 1
+                    
+            except:
+                continue  # Skip problematic messages
+        
+        return {"processed": processed, "updated": updated}
+    
+    def _get_recipient_email(self, recipient) -> Optional[str]:
+        """Extract SMTP email from a recipient (To, CC, or BCC)."""
+        try:
+            if recipient.AddressEntry:
+                # Exchange user
+                if recipient.AddressEntry.AddressEntryUserType == 0:
+                    exch_user = recipient.AddressEntry.GetExchangeUser()
+                    if exch_user:
+                        return exch_user.PrimarySmtpAddress
+                # Try SMTP property
+                try:
+                    return recipient.PropertyAccessor.GetProperty(
+                        "http://schemas.microsoft.com/mapi/proptag/0x39FE001F"
+                    )
+                except:
+                    return recipient.Address
+        except:
+            pass
+        return None
+    
     def _get_sender_email(self, message) -> str:
         """Extract sender email, handling Exchange addresses."""
         try:
@@ -270,7 +349,7 @@ class OutlookClient:
             date_cutoff = since_time
         else:
             date_cutoff = datetime.now() - timedelta(days=days)
-        date_str = date_cutoff.strftime("%m/%d/%Y %H:%M %p")
+        date_str = date_cutoff.strftime("%d/%m/%Y %H:%M")
         filter_str = f"[ReceivedTime] >= '{date_str}'"
         
         messages = folder.Items
@@ -316,6 +395,90 @@ class OutlookClient:
         except:
             pass
         return "(no domain)"
+    
+    def get_emails_by_conversation_id(
+        self,
+        conversation_id: str,
+        include_sent: bool = True,
+        include_dms: bool = False,
+        limit: int = 50,
+        conversation_topic: str = None
+    ) -> List[Email]:
+        """Get all emails matching a ConversationID across folders.
+        
+        Note: Outlook's Restrict() doesn't support ConversationID filtering directly.
+        We use ConversationTopic to find candidates, then verify ConversationID matches.
+        
+        Args:
+            conversation_id: Exchange ConversationID to search for
+            include_sent: Include Sent Items folder (default: True)
+            include_dms: Include DMS store folders (default: False)
+            limit: Maximum emails to return (default: 50)
+            conversation_topic: ConversationTopic for filtering (optional but recommended)
+            
+        Returns:
+            List of Email objects matching the ConversationID
+        """
+        self._ensure_connection()
+        
+        results = []
+        
+        # If no topic provided, we can't filter efficiently
+        # ConversationID is not a filterable property in Outlook Restrict()
+        if not conversation_topic:
+            return results
+        
+        # Escape single quotes for Jet filter
+        escaped_topic = conversation_topic.replace("'", "''")
+        filter_str = f"[ConversationTopic] = '{escaped_topic}'"
+        
+        def search_folder(folder, direction: str, folder_path: str = None):
+            """Search a folder and add matching emails to results."""
+            nonlocal results
+            if folder_path is None:
+                folder_path = folder.Name
+            try:
+                messages = folder.Items.Restrict(filter_str)
+                for message in messages:
+                    if len(results) >= limit:
+                        return
+                    # Verify ConversationID matches exactly
+                    msg_conv_id = getattr(message, 'ConversationID', None)
+                    if msg_conv_id != conversation_id:
+                        continue
+                    if direction == "outbound":
+                        recipient_domain = self._get_primary_recipient_domain(message)
+                        email = self._message_to_email(message, folder_path, direction, recipient_domain)
+                    else:
+                        email = self._message_to_email(message, folder_path, direction)
+                    if email:
+                        results.append(email)
+            except Exception:
+                pass
+        
+        # Search Inbox
+        inbox = self._namespace.GetDefaultFolder(self.FOLDER_INBOX)
+        search_folder(inbox, "inbound")
+        
+        # Search Sent Items if requested
+        if include_sent and len(results) < limit:
+            sent = self._namespace.GetDefaultFolder(self.FOLDER_SENT)
+            search_folder(sent, "outbound")
+        
+        # Search DMS if requested (limited to top-level DMS folders)
+        if include_dms and len(results) < limit:
+            try:
+                dms_store = self._get_dms_store()
+                if dms_store:
+                    for folder in dms_store.Folders:
+                        if len(results) >= limit:
+                            break
+                        folder_path = f"DMS\\{folder.Name}"
+                        search_folder(folder, "inbound", folder_path)
+            except Exception:
+                pass
+        
+        return results
     
     def get_email_body(self, email_id: str, max_length: int = 10000) -> str:
         """
@@ -532,6 +695,117 @@ class OutlookClient:
         except Exception as e:
             return False
     
+    def move_to_archive(self, email_id: str, folder_path: str = "Archive", create_path: bool = False) -> Dict[str, Any]:
+        r"""Move an email to a folder (default: Archive).
+        
+        Supports both simple folder names and full paths with subfolders.
+        Examples:
+          - "Archive" (root-level folder)
+          - "Inbox\~Zero\Growth Engineering" (subfolder path)
+          - "\\David.Sant@harperjames.co.uk\Inbox\~Zero" (full path - mailbox prefix stripped)
+        
+        Args:
+            email_id: Outlook EntryID of the email to archive
+            folder_path: Folder name or path (default: "Archive")
+            create_path: If True, create missing folders in the path (default: False)
+            
+        Returns:
+            Dict with success status, new_id (EntryID changes after move),
+            and folders_created list if any were created
+        """
+        self._ensure_connection()
+        
+        try:
+            message = self._namespace.GetItemFromID(email_id)
+            
+            # Get root folder (the mailbox itself)
+            inbox = self._namespace.GetDefaultFolder(self.FOLDER_INBOX)
+            root = inbox.Parent  # Parent of Inbox = mailbox root
+            
+            # Parse folder path - handle full paths and relative paths
+            # Strip leading backslashes and mailbox name if present
+            clean_path = folder_path.strip("\\")
+            first_part = clean_path.split("\\")[0] if "\\" in clean_path else ""
+            if "@" in first_part:
+                # Full path like "David.Sant@harperjames.co.uk\Inbox\~Zero" - strip mailbox
+                clean_path = "\\".join(clean_path.split("\\")[1:])
+            
+            # Split into folder components
+            path_parts = [p for p in clean_path.split("\\") if p]
+            
+            # Navigate to target folder, optionally creating missing folders
+            target_folder = None
+            current_folder = root
+            folders_created = []
+            for part in path_parts:
+                found = False
+                for subfolder in current_folder.Folders:
+                    if subfolder.Name.lower() == part.lower():
+                        current_folder = subfolder
+                        found = True
+                        break
+                if not found:
+                    if create_path:
+                        # Create the missing folder
+                        current_folder = current_folder.Folders.Add(part)
+                        folders_created.append(part)
+                    else:
+                        return {"success": False, "error": f"Folder '{part}' not found in path '{folder_path}'"}
+            target_folder = current_folder
+            
+            if target_folder == root:
+                return {"success": False, "error": f"Invalid folder path: {folder_path}"}
+            
+            # Move returns the new MailItem (with new EntryID)
+            moved_message = message.Move(target_folder)
+            
+            result = {
+                "success": True,
+                "old_id": email_id,
+                "new_id": moved_message.EntryID,
+                "folder": target_folder.FolderPath
+            }
+            if folders_created:
+                result["folders_created"] = folders_created
+            return result
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def batch_move_to_archive(self, email_ids: List[str], folder_path: str = "Archive", create_path: bool = False) -> Dict[str, Any]:
+        r"""Move multiple emails to a folder (default: Archive).
+        
+        Supports folder paths with subfolders (see move_to_archive).
+        
+        Args:
+            email_ids: List of Outlook EntryIDs
+            folder_path: Folder name or path (default: "Archive")
+            create_path: If True, create missing folders in the path (default: False)
+            
+        Returns:
+            Dict with success/failed counts, details, and folders_created if any
+        """
+        results = {"success": 0, "failed": 0, "moved": [], "errors": [], "folders_created": []}
+        
+        for email_id in email_ids:
+            result = self.move_to_archive(email_id, folder_path=folder_path, create_path=create_path)
+            if result.get("success"):
+                results["success"] += 1
+                results["moved"].append({"old_id": email_id, "new_id": result.get("new_id")})
+                # Track folders created (only first email will create them)
+                if result.get("folders_created"):
+                    for folder in result["folders_created"]:
+                        if folder not in results["folders_created"]:
+                            results["folders_created"].append(folder)
+            else:
+                results["failed"] += 1
+                results["errors"].append({"id": email_id, "error": result.get("error")})
+        
+        # Remove empty folders_created list for cleaner output
+        if not results["folders_created"]:
+            del results["folders_created"]
+        
+        return results
+    
     def set_category(self, email_id: str, category: str) -> bool:
         """Set Outlook category on an email."""
         self._ensure_connection()
@@ -550,9 +824,10 @@ class OutlookClient:
     # Categories are prefixed with "effi:" to avoid conflicts with user categories
     TRIAGE_CATEGORY_PREFIX = "effi:"
     TRIAGE_CATEGORIES = {
-        "processed": "effi:processed",
-        "deferred": "effi:deferred",
-        "archived": "effi:archived",
+        "action": "effi:action",        # I need to do something
+        "waiting": "effi:waiting",      # Ball in someone else's court
+        "processed": "effi:processed",  # Dealt with, linked to matter
+        "archived": "effi:archived",    # Reference only, no action needed
     }
     
     def set_triage_status(self, email_id: str, status: str) -> bool:
@@ -561,7 +836,7 @@ class OutlookClient:
         
         Args:
             email_id: Outlook EntryID
-            status: One of 'processed', 'deferred', 'archived'
+            status: One of 'action', 'waiting', 'processed', 'archived'
             
         Returns:
             True if successful, False otherwise
@@ -596,7 +871,7 @@ class OutlookClient:
             email_id: Outlook EntryID
             
         Returns:
-            Status string ('processed', 'deferred', 'archived') or None if pending/not triaged
+            Status string ('action', 'waiting', 'processed', 'archived') or None if pending/not triaged
         """
         self._ensure_connection()
         
@@ -643,7 +918,7 @@ class OutlookClient:
         
         Args:
             email_ids: List of Outlook EntryIDs
-            status: One of 'processed', 'deferred', 'archived'
+            status: One of 'action', 'waiting', 'processed', 'archived'
             
         Returns:
             Dict with success count, failure count, and failed IDs
@@ -686,7 +961,7 @@ class OutlookClient:
         if not date_from:
             date_from = datetime.now() - timedelta(days=days)
         
-        date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+        date_str = date_from.strftime("%d/%m/%Y %H:%M")
         date_query = f"[ReceivedTime] >= '{date_str}'"
         
         messages = folder.Items
@@ -767,7 +1042,7 @@ class OutlookClient:
         folder = self._namespace.GetDefaultFolder(self.FOLDER_INBOX)
         
         date_from = datetime.now() - timedelta(days=days)
-        date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+        date_str = date_from.strftime("%d/%m/%Y %H:%M")
         date_query = f"[ReceivedTime] >= '{date_str}'"
         
         messages = folder.Items
@@ -851,7 +1126,7 @@ class OutlookClient:
         folder = self._namespace.GetDefaultFolder(self.FOLDER_INBOX)
         
         date_from = datetime.now() - timedelta(days=days)
-        date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+        date_str = date_from.strftime("%d/%m/%Y %H:%M")
         
         # Use DASL for domain filter
         dasl_query = f"@SQL=\"urn:schemas:httpmail:fromemail\" LIKE '%@{domain}'"
@@ -961,10 +1236,10 @@ class OutlookClient:
         if dasl_conditions:
             # Add dates to DASL query using urn:schemas:httpmail:datereceived
             if date_from:
-                date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+                date_str = date_from.strftime("%d/%m/%Y %H:%M")
                 dasl_conditions.append(f"\"urn:schemas:httpmail:datereceived\" >= '{date_str}'")
             if date_to:
-                date_str = date_to.strftime("%m/%d/%Y %H:%M %p")
+                date_str = date_to.strftime("%d/%m/%Y %H:%M")
                 dasl_conditions.append(f"\"urn:schemas:httpmail:datereceived\" <= '{date_str}'")
             
             dasl_query = "@SQL=" + " AND ".join(dasl_conditions)
@@ -973,10 +1248,10 @@ class OutlookClient:
         # No DASL conditions - use Jet for dates only (indexed, fast)
         jet_conditions = []
         if date_from:
-            date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+            date_str = date_from.strftime("%d/%m/%Y %H:%M")
             jet_conditions.append(f"[ReceivedTime] >= '{date_str}'")
         if date_to:
-            date_str = date_to.strftime("%m/%d/%Y %H:%M %p")
+            date_str = date_to.strftime("%d/%m/%Y %H:%M")
             jet_conditions.append(f"[ReceivedTime] <= '{date_str}'")
         
         jet_query = " AND ".join(jet_conditions) if jet_conditions else None
@@ -1023,15 +1298,42 @@ class OutlookClient:
         """
         self._ensure_connection()
         
-        # Determine folder
-        if folder.lower() in ["sent", "sent items"]:
-            folder_id = self.FOLDER_SENT
-            direction = "outbound"
-        else:
-            folder_id = self.FOLDER_INBOX
-            direction = "inbound"
+        # Determine folder - support paths like "Inbox\~Zero" or simple names
+        direction = "inbound"
+        folder_obj = None
         
-        folder_obj = self._namespace.GetDefaultFolder(folder_id)
+        if folder.lower() in ["sent", "sent items"]:
+            folder_obj = self._namespace.GetDefaultFolder(self.FOLDER_SENT)
+            direction = "outbound"
+        elif "\\" in folder or "/" in folder:
+            # Subfolder path - navigate to it
+            # Normalize to backslash
+            folder_path = folder.replace("/", "\\")
+            path_parts = [p for p in folder_path.split("\\") if p]
+            
+            if path_parts:
+                # Start from the root folder (first part)
+                first_part = path_parts[0].lower()
+                if first_part in ["sent", "sent items"]:
+                    folder_obj = self._namespace.GetDefaultFolder(self.FOLDER_SENT)
+                    direction = "outbound"
+                else:
+                    folder_obj = self._namespace.GetDefaultFolder(self.FOLDER_INBOX)
+                
+                # Navigate to subfolders
+                for part in path_parts[1:]:
+                    found = False
+                    for subfolder in folder_obj.Folders:
+                        if subfolder.Name.lower() == part.lower():
+                            folder_obj = subfolder
+                            found = True
+                            break
+                    if not found:
+                        # Subfolder not found - return empty
+                        return []
+        else:
+            # Simple folder name
+            folder_obj = self._namespace.GetDefaultFolder(self.FOLDER_INBOX)
         
         # Set date range
         if not date_from:
@@ -1067,7 +1369,7 @@ class OutlookClient:
                 filtered = messages
         except Exception as e:
             # Fallback to simple date filter
-            date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+            date_str = date_from.strftime("%d/%m/%Y %H:%M")
             filtered = messages.Restrict(f"[ReceivedTime] >= '{date_str}'")
         
         for message in filtered:
@@ -1202,6 +1504,7 @@ class OutlookClient:
                 "attachments": attachments,
                 "internet_message_id": self._get_internet_message_id(message),
                 "conversation_id": getattr(message, 'ConversationID', None),
+                "conversation_topic": getattr(message, 'ConversationTopic', None),
             }
         except Exception as e:
             raise Exception(f"Error retrieving email: {e}")
@@ -1236,6 +1539,7 @@ class OutlookClient:
     DMS_STORE_NAME = "DMSforLegal"
     DMS_ROOT_FOLDER = "_My Matters"
     DMS_EMAILS_FOLDER = "Emails"
+    DMS_ADMIN_FOLDER = "Admin"
     
     def _get_dms_store(self):
         """Get the DMSforLegal Outlook store.
@@ -1360,6 +1664,45 @@ class OutlookClient:
         
         return results
     
+    def get_dms_admin_emails(self, client: str, matter: str, limit: int = 50) -> List[Email]:
+        """Get emails from a matter's Admin folder in DMS.
+        
+        Args:
+            client: Client folder name
+            matter: Matter folder name
+            limit: Maximum emails to return (default 50)
+            
+        Returns:
+            List of Email objects
+        """
+        path = f"{self.DMS_ROOT_FOLDER}\\{client}\\{matter}\\{self.DMS_ADMIN_FOLDER}"
+        folder = self._get_folder_by_path(path)
+        if not folder:
+            return []
+        
+        results = []
+        try:
+            items = folder.Items
+            items.Sort("[ReceivedTime]", True)  # Most recent first
+            
+            for message in items:
+                if len(results) >= limit:
+                    break
+                try:
+                    email = self._message_to_email(
+                        message, 
+                        folder_path=f"DMS/{client}/{matter}/Admin",
+                        direction="filed"
+                    )
+                    if email:
+                        results.append(email)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        
+        return results
+    
     def search_dms_emails(
         self,
         client: str = None,
@@ -1416,10 +1759,10 @@ class OutlookClient:
                     
                     # Apply date filter if provided
                     if date_from:
-                        date_str = date_from.strftime("%m/%d/%Y %H:%M %p")
+                        date_str = date_from.strftime("%d/%m/%Y %H:%M")
                         items = items.Restrict(f"[ReceivedTime] >= '{date_str}'")
                     if date_to:
-                        date_str = date_to.strftime("%m/%d/%Y %H:%M %p")
+                        date_str = date_to.strftime("%d/%m/%Y %H:%M")
                         items = items.Restrict(f"[ReceivedTime] <= '{date_str}'")
                     
                     for message in items:
@@ -1514,8 +1857,11 @@ class OutlookClient:
             }
         
         # Copy email to DMS
+        # Note: Copy().Move() across different store types can create empty shells
+        # Saving the copy first forces content sync before the cross-store move
         try:
             copied = message.Copy()
+            copied.Save()  # Force content materialization before cross-store move
             filed_message = copied.Move(emails_folder)
             filed_entry_id = filed_message.EntryID
         except Exception as e:
@@ -1557,6 +1903,113 @@ class OutlookClient:
             "subject": message.Subject,
             "received_time": message.ReceivedTime.isoformat() if hasattr(message.ReceivedTime, 'isoformat') else str(message.ReceivedTime),
             "filed_category": "Filed",
+            "triage_status": "processed"
+        }
+
+    def file_email_to_dms_admin(
+        self,
+        email_id: str,
+        client_name: str,
+        matter_name: str,
+    ) -> Dict[str, Any]:
+        """File an admin email to a DMS client/matter Admin folder.
+        
+        Same as file_email_to_dms but files to Admin subfolder instead of Emails.
+        Used for internal/system emails related to a matter (e.g. new project notifications).
+        
+        Args:
+            email_id: EntryID of the email to file
+            client_name: Client folder name in DMS
+            matter_name: Matter folder name under the client
+            
+        Returns:
+            Dict with success status, filed email details, or error message.
+        """
+        self._ensure_connection()
+        
+        # Build path to Admin folder
+        dms_path = f"{self.DMS_ROOT_FOLDER}\\{client_name}\\{matter_name}\\{self.DMS_ADMIN_FOLDER}"
+        admin_folder = self._get_folder_by_path(dms_path)
+        
+        if not admin_folder:
+            # Determine which part is missing for better error message
+            client_path = f"{self.DMS_ROOT_FOLDER}\\{client_name}"
+            client_folder = self._get_folder_by_path(client_path)
+            
+            if not client_folder:
+                return {
+                    "success": False,
+                    "error": f"Client '{client_name}' not found in DMS"
+                }
+            
+            matter_path = f"{self.DMS_ROOT_FOLDER}\\{client_name}\\{matter_name}"
+            matter_folder = self._get_folder_by_path(matter_path)
+            
+            if not matter_folder:
+                return {
+                    "success": False,
+                    "error": f"Matter '{matter_name}' not found for client '{client_name}'"
+                }
+            
+            return {
+                "success": False,
+                "error": f"Admin folder not found for matter '{matter_name}'. Please create the Admin subfolder in DMS."
+            }
+        
+        # Get the email to file
+        try:
+            message = self._namespace.GetItemFromID(email_id)
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Email not found: {str(e)}"
+            }
+        
+        # Copy email to DMS Admin folder
+        # Note: Copy().Move() across different store types can create empty shells
+        # Saving the copy first forces content sync before the cross-store move
+        try:
+            copied = message.Copy()
+            copied.Save()  # Force content materialization before cross-store move
+            filed_message = copied.Move(admin_folder)
+            filed_entry_id = filed_message.EntryID
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to copy email to DMS Admin: {str(e)}"
+            }
+        
+        # Add "Filed" category and effi:processed to original
+        try:
+            existing_categories = message.Categories or ""
+            categories = [c.strip() for c in existing_categories.split(",") if c.strip()]
+            
+            # Remove any existing effi: triage categories
+            categories = [c for c in categories if not c.startswith(self.TRIAGE_CATEGORY_PREFIX)]
+            
+            # Add Filed and effi:processed
+            if "Filed" not in categories:
+                categories.append("Filed")
+            categories.append(self.TRIAGE_CATEGORIES["processed"])
+            
+            message.Categories = ", ".join(categories)
+            message.Save()
+        except Exception as e:
+            return {
+                "success": True,
+                "filed_entry_id": filed_entry_id,
+                "subject": message.Subject,
+                "received_time": message.ReceivedTime.isoformat() if hasattr(message.ReceivedTime, 'isoformat') else str(message.ReceivedTime),
+                "filed_to": "Admin",
+                "warning": f"Filed successfully but failed to update categories: {str(e)}"
+            }
+        
+        return {
+            "success": True,
+            "filed_entry_id": filed_entry_id,
+            "subject": message.Subject,
+            "received_time": message.ReceivedTime.isoformat() if hasattr(message.ReceivedTime, 'isoformat') else str(message.ReceivedTime),
+            "filed_to": "Admin",
             "triage_status": "processed"
         }
 
@@ -1633,8 +2086,9 @@ class OutlookClient:
             try:
                 message = self._namespace.GetItemFromID(email_id)
                 
-                # Copy to DMS
+                # Copy to DMS - Save before Move to prevent empty shell issue
                 copied = message.Copy()
+                copied.Save()  # Force content materialization before cross-store move
                 filed_message = copied.Move(emails_folder)
                 
                 # Add categories to original

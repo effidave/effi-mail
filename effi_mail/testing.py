@@ -20,6 +20,9 @@ from effi_mail.tools import (
     get_domain_summary as _get_domain_summary,
     get_emails_by_client as _get_emails_by_client,
     search_outlook_direct as _search_outlook_direct,
+    scan_for_commitments as _scan_for_commitments,
+    mark_scanned as _mark_scanned,
+    batch_mark_scanned as _batch_mark_scanned,
     list_dms_clients as _list_dms_clients,
     list_dms_matters as _list_dms_matters,
     get_dms_emails as _get_dms_emails,
@@ -85,7 +88,7 @@ async def list_tools() -> List[Tool]:
                 "type": "object",
                 "properties": {
                     "email_id": {"type": "string"},
-                    "status": {"type": "string", "enum": ["processed", "deferred", "archived"]}
+                    "status": {"type": "string", "enum": ["action", "waiting", "processed", "archived"]}
                 },
                 "required": ["email_id", "status"]
             }
@@ -97,7 +100,7 @@ async def list_tools() -> List[Tool]:
                 "type": "object",
                 "properties": {
                     "email_ids": {"type": "array", "items": {"type": "string"}},
-                    "status": {"type": "string", "enum": ["processed", "deferred", "archived"]}
+                    "status": {"type": "string", "enum": ["action", "waiting", "processed", "archived"]}
                 },
                 "required": ["email_ids", "status"]
             }
@@ -179,6 +182,41 @@ async def list_tools() -> List[Tool]:
                     "folder": {"type": "string", "default": "Inbox"},
                     "limit": {"type": "integer", "default": 50}
                 }
+            }
+        ),
+        
+        # Commitment scanning tools
+        Tool(
+            name="scan_for_commitments",
+            description="Scan sent emails for commitment detection. Returns unscanned emails with full body.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "default": 14},
+                    "limit": {"type": "integer", "default": 100}
+                }
+            }
+        ),
+        Tool(
+            name="mark_scanned",
+            description="Mark an email as scanned for commitments.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "email_id": {"type": "string"}
+                },
+                "required": ["email_id"]
+            }
+        ),
+        Tool(
+            name="batch_mark_scanned",
+            description="Mark multiple emails as scanned for commitments.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "email_ids": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["email_ids"]
             }
         ),
         
@@ -350,6 +388,26 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 days=arguments.get("days", 30),
                 folder=arguments.get("folder", "Inbox"),
                 limit=arguments.get("limit", 50)
+            )
+            return [TextContent(type="text", text=result)]
+        
+        # Commitment scanning tools
+        elif name == "scan_for_commitments":
+            result = _scan_for_commitments(
+                days=arguments.get("days", 14),
+                limit=arguments.get("limit", 100)
+            )
+            return [TextContent(type="text", text=result)]
+        
+        elif name == "mark_scanned":
+            result = _mark_scanned(
+                email_id=arguments["email_id"]
+            )
+            return [TextContent(type="text", text=result)]
+        
+        elif name == "batch_mark_scanned":
+            result = _batch_mark_scanned(
+                email_ids=arguments["email_ids"]
             )
             return [TextContent(type="text", text=result)]
         

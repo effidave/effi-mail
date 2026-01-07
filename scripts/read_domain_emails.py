@@ -16,7 +16,7 @@ def get_emails_from_domain(domain, days=30):
         
         # Calculate date cutoff
         cutoff_date = datetime.now() - timedelta(days=days)
-        cutoff_str = cutoff_date.strftime("%m/%d/%Y %H:%M %p")
+        cutoff_str = cutoff_date.strftime("%d/%m/%Y %H:%M")
         
         print(f"Searching for emails from domain: {domain}")
         print(f"Date range: {cutoff_date.strftime('%Y-%m-%d')} to now")

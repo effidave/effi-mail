@@ -55,7 +55,7 @@ def get_recent_emails(days=7):
     
     # Calculate date filter
     date_cutoff = datetime.now() - timedelta(days=days)
-    date_str = date_cutoff.strftime("%m/%d/%Y %H:%M %p")
+    date_str = date_cutoff.strftime("%d/%m/%Y %H:%M")
     filter_str = f"[ReceivedTime] >= '{date_str}'"
     
     messages = inbox.Items
