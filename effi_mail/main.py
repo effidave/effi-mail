@@ -17,6 +17,7 @@ from effi_mail.tools import (
     batch_archive_domain,
     archive_email,
     batch_archive_emails,
+    list_subfolders,
     # Domain categories
     get_uncategorized_domains,
     categorize_domain,
@@ -66,6 +67,7 @@ mcp.tool()(batch_triage)
 mcp.tool()(batch_archive_domain)
 mcp.tool()(archive_email)
 mcp.tool()(batch_archive_emails)
+mcp.tool()(list_subfolders)
 
 # Register domain categorization tools
 mcp.tool()(get_uncategorized_domains)

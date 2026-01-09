@@ -1463,6 +1463,8 @@ class OutlookClient:
     def get_email_full(self, email_id: str) -> Dict[str, Any]:
         """Get full email details by EntryID including body and attachments.
         
+        Works for regular emails (MailItem) and meeting requests (MeetingItem).
+        
         Args:
             email_id: Outlook EntryID
             
@@ -1474,24 +1476,37 @@ class OutlookClient:
         try:
             message = self._namespace.GetItemFromID(email_id)
             
-            # Get body
+            # Get body - always available
             body = message.Body or ""
-            html_body = message.HTMLBody or ""
+            
+            # HTMLBody is not available for meeting items (Class 53)
+            # Try to get it, fall back to empty string
+            try:
+                html_body = message.HTMLBody or ""
+            except Exception:
+                html_body = ""
             
             # Get attachments
             attachments = []
-            for i in range(1, message.Attachments.Count + 1):
-                att = message.Attachments.Item(i)
-                attachments.append({
-                    "name": att.FileName,
-                    "size": att.Size,
-                })
+            try:
+                for i in range(1, message.Attachments.Count + 1):
+                    att = message.Attachments.Item(i)
+                    attachments.append({
+                        "name": att.FileName,
+                        "size": att.Size,
+                    })
+            except Exception:
+                pass  # Some item types may not support attachments
             
             # Get recipients
             recipients_to = self._extract_recipients(message, "To")
             recipients_cc = self._extract_recipients(message, "CC")
             
-            return {
+            # Get message class to identify item type
+            message_class = getattr(message, 'MessageClass', 'IPM.Note')
+            
+            # Build result
+            result = {
                 "id": email_id,
                 "subject": message.Subject or "(No Subject)",
                 "sender_name": message.SenderName or "",
@@ -1505,7 +1520,21 @@ class OutlookClient:
                 "internet_message_id": self._get_internet_message_id(message),
                 "conversation_id": getattr(message, 'ConversationID', None),
                 "conversation_topic": getattr(message, 'ConversationTopic', None),
+                "message_class": message_class,
             }
+            
+            # Add meeting-specific fields if this is a meeting request
+            if message_class.startswith('IPM.Schedule.Meeting'):
+                result["is_meeting_request"] = True
+                # Get meeting details if available
+                try:
+                    result["start_time"] = message.Start.isoformat() if hasattr(message, 'Start') and message.Start else None
+                    result["end_time"] = message.End.isoformat() if hasattr(message, 'End') and message.End else None
+                    result["location"] = getattr(message, 'Location', None)
+                except Exception:
+                    pass
+            
+            return result
         except Exception as e:
             raise Exception(f"Error retrieving email: {e}")
 
@@ -2122,3 +2151,48 @@ class OutlookClient:
             "filed_emails": filed_emails,
             "failed_emails": failed_emails
         }
+
+    def list_subfolders(self, folder_path: str) -> List[str]:
+        r"""List subfolders within a given folder path.
+        
+        Args:
+            folder_path: Path to the folder, e.g. "Inbox\~Zero" or "Inbox"
+            
+        Returns:
+            Sorted list of subfolder names
+        """
+        self._ensure_connection()
+        
+        try:
+            # Get root folder (the mailbox itself)
+            inbox = self._namespace.GetDefaultFolder(self.FOLDER_INBOX)
+            root = inbox.Parent  # Parent of Inbox = mailbox root
+            
+            # Parse folder path - handle full paths and relative paths
+            clean_path = folder_path.strip("\\")
+            first_part = clean_path.split("\\")[0] if "\\" in clean_path else ""
+            if "@" in first_part:
+                # Full path like "David.Sant@harperjames.co.uk\Inbox\~Zero" - strip mailbox
+                clean_path = "\\".join(clean_path.split("\\")[1:])
+            
+            # Split into folder components
+            path_parts = [p for p in clean_path.split("\\") if p]
+            
+            # Navigate to target folder
+            current_folder = root
+            for part in path_parts:
+                found = False
+                for subfolder in current_folder.Folders:
+                    if subfolder.Name.lower() == part.lower():
+                        current_folder = subfolder
+                        found = True
+                        break
+                if not found:
+                    return []  # Folder not found
+            
+            # List subfolders
+            subfolders = [f.Name for f in current_folder.Folders]
+            return sorted(subfolders)
+            
+        except Exception:
+            return []

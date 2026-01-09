@@ -17,6 +17,7 @@ from effi_mail.tools.triage import (
     batch_archive_domain,
     archive_email,
     batch_archive_emails,
+    list_subfolders,
 )
 from effi_mail.tools.domain_categories import (
     get_uncategorized_domains,
@@ -66,6 +67,7 @@ __all__ = [
     "batch_archive_domain",
     "archive_email",
     "batch_archive_emails",
+    "list_subfolders",
     # Domain categories
     "get_uncategorized_domains",
     "categorize_domain",

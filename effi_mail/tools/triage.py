@@ -86,3 +86,26 @@ def batch_archive_emails(email_ids: List[str], folder: str = "Archive", create_p
     """
     result = outlook.batch_move_to_archive(email_ids, folder_path=folder, create_path=create_path)
     return json.dumps(result)
+
+
+def list_subfolders(folder: str) -> str:
+    r"""List subfolders within a given folder path.
+    
+    Use this to discover folder structure before moving or searching emails.
+    
+    Examples:
+      - "Inbox" to see top-level Inbox subfolders
+      - "Inbox\~Zero" to see subfolders under ~Zero
+    
+    Args:
+        folder: Folder path, e.g. "Inbox" or "Inbox\~Zero"
+        
+    Returns:
+        JSON with folder path and sorted list of subfolder names
+    """
+    subfolders = outlook.list_subfolders(folder)
+    return json.dumps({
+        "folder": folder,
+        "count": len(subfolders),
+        "subfolders": subfolders
+    }, indent=2)
