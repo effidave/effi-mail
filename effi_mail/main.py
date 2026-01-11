@@ -38,6 +38,9 @@ from effi_mail.tools import (
     file_email_to_dms,
     file_admin_email_to_dms,
     batch_file_emails_to_dms,
+    # Workspace filing
+    file_email_to_workspace,
+    file_thread_to_workspace,
     # Thread tracking
     get_email_thread,
     get_thread_locations,
@@ -92,6 +95,10 @@ mcp.tool()(search_dms)
 mcp.tool()(file_email_to_dms)
 mcp.tool()(file_admin_email_to_dms)
 mcp.tool()(batch_file_emails_to_dms)
+
+# Register workspace filing tools
+mcp.tool()(file_email_to_workspace)
+mcp.tool()(file_thread_to_workspace)
 
 # Register thread tracking tools
 mcp.tool()(get_email_thread)

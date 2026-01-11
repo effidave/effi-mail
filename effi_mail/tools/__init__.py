@@ -41,6 +41,10 @@ from effi_mail.tools.dms import (
     file_admin_email_to_dms,
     batch_file_emails_to_dms,
 )
+from effi_mail.tools.workspace_filing import (
+    file_email_to_workspace,
+    file_thread_to_workspace,
+)
 from effi_mail.tools.thread import (
     get_email_thread,
     get_thread_locations,
@@ -88,6 +92,9 @@ __all__ = [
     "file_email_to_dms",
     "file_admin_email_to_dms",
     "batch_file_emails_to_dms",
+    # Workspace filing
+    "file_email_to_workspace",
+    "file_thread_to_workspace",
     # Thread tracking
     "get_email_thread",
     "get_thread_locations",
