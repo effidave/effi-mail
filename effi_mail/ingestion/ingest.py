@@ -20,6 +20,9 @@ OL_FOLDER_INBOX = 6
 OL_FOLDER_SENT = 5
 OL_FOLDER_DRAFTS = 16
 
+# Entry ID slug length for filename generation
+ENTRY_ID_SLUG_LENGTH = 16
+
 
 def get_outlook_folder(folder: str = "Inbox"):
     """Connect to Outlook and return specified folder.
@@ -30,6 +33,9 @@ def get_outlook_folder(folder: str = "Inbox"):
     
     Returns:
         Outlook folder object
+        
+    Raises:
+        Exception: If folder navigation fails
     """
     outlook = win32com.client.Dispatch("Outlook.Application")
     namespace = outlook.GetNamespace("MAPI")
@@ -48,8 +54,11 @@ def get_outlook_folder(folder: str = "Inbox"):
     root = inbox.Parent  # Gets the mailbox root
     
     current = root
-    for part in folder.split("/"):
-        current = current.Folders[part]
+    try:
+        for part in folder.split("/"):
+            current = current.Folders[part]
+    except Exception as e:
+        raise Exception(f"Failed to navigate to folder '{folder}'. Check that the folder path is correct.") from e
     
     return current
 
@@ -121,7 +130,7 @@ def save_email(msg, inbox_path: Path) -> Path:
     """Save a single Outlook message to the inbox folder.
     
     Args:
-        msg: Outlook COM message object
+        msg: Outlook COM message object (win32com dispatch object)
         inbox_path: Path to _inbox folder
     
     Returns:
@@ -139,8 +148,8 @@ def save_email(msg, inbox_path: Path) -> Path:
     
     # Create filename using entry ID slug as specified
     timestamp = received_dt.strftime("%Y-%m-%d-%H%M%S")
-    # Use last 16 chars of EntryID (more unique than first 12)
-    slug = message_id[-16:].replace("/", "_").replace("+", "_")
+    # Use last N chars of EntryID (more unique than first chars)
+    slug = message_id[-ENTRY_ID_SLUG_LENGTH:].replace("/", "_").replace("+", "_")
     base_name = f"{timestamp}_{slug}"
     
     md_path = inbox_path / f"{base_name}.md"

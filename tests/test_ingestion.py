@@ -18,7 +18,16 @@ from pathlib import Path
 import importlib.util
 
 # Direct import without going through package __init__.py to avoid Windows dependencies
-def import_module_from_path(module_name, file_path):
+def import_module_from_path(module_name: str, file_path: Path):
+    """Import a module directly from a file path.
+    
+    Args:
+        module_name: Name to register the module under
+        file_path: Path to the Python module file
+        
+    Returns:
+        The imported module
+    """
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module

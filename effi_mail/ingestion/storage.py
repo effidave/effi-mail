@@ -51,7 +51,7 @@ def save_attachments(msg, attachments_dir: Path) -> list[dict]:
     """Save all attachments from an Outlook message.
     
     Args:
-        msg: Outlook COM message object
+        msg: Outlook COM message object (win32com dispatch object)
         attachments_dir: Directory to save attachments
         
     Returns:
@@ -64,6 +64,7 @@ def save_attachments(msg, attachments_dir: Path) -> list[dict]:
     
     attachments_dir.mkdir(parents=True, exist_ok=True)
     
+    # Note: Outlook COM API uses 1-based indexing (not 0-based like Python)
     for i in range(1, msg.Attachments.Count + 1):
         att = msg.Attachments.Item(i)
         filename = att.FileName
