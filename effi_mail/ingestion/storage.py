@@ -82,7 +82,8 @@ def save_attachments(msg, attachments_dir: Path) -> list[dict]:
             att.SaveAsFile(str(filepath))
             
             saved.append({
-                "filename": filename,
+                "filename": filepath.name,
+                "original_filename": filename,
                 "local_path": f"./{attachments_dir.name}/{filepath.name}",
                 "size_bytes": filepath.stat().st_size,
             })
