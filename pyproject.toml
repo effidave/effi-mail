@@ -7,10 +7,12 @@ requires-python = ">=3.10"
 dependencies = [
     "fastmcp>=2.0.0",
     "pywin32>=306",
+    "python-frontmatter>=1.0.0",
 ]
 
 [project.scripts]
 effi-mail = "effi_mail:main"
+ingest-emails = "scripts.ingest_emails:main"
 
 [build-system]
 requires = ["hatchling"]
