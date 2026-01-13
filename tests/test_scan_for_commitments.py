@@ -145,7 +145,9 @@ class TestScanForCommitments:
         """Should query Sent Items folder."""
         mock_outlook.search_outlook = Mock(return_value=sent_emails_with_commitments)
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             result = await call_tool("scan_for_commitments", {"days": 7})
             
@@ -163,7 +165,9 @@ class TestScanForCommitments:
         all_emails = sent_emails_with_commitments + [already_scanned_email]
         mock_outlook.search_outlook = Mock(return_value=all_emails)
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             result = await call_tool("scan_for_commitments", {"days": 7})
             
@@ -191,7 +195,9 @@ class TestScanForCommitments:
             "attachments": [],
         })
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             result = await call_tool("scan_for_commitments", {"days": 7})
             
@@ -217,7 +223,9 @@ class TestScanForCommitments:
             "attachments": [],
         })
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             result = await call_tool("scan_for_commitments", {"days": 7})
             
@@ -230,7 +238,9 @@ class TestScanForCommitments:
         """Should use days parameter for date filtering."""
         mock_outlook.search_outlook = Mock(return_value=[])
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             await call_tool("scan_for_commitments", {"days": 14})
             
@@ -242,25 +252,31 @@ class TestScanForCommitments:
         """Should use limit parameter."""
         mock_outlook.search_outlook = Mock(return_value=[])
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             await call_tool("scan_for_commitments", {"days": 7, "limit": 50})
             
             call_args = mock_outlook.search_outlook.call_args
-            assert call_args.kwargs.get('limit') == 50
+            # Implementation fetches limit*2 to account for filtered emails
+            assert call_args.kwargs.get('limit') == 100
     
     @pytest.mark.asyncio
     async def test_default_parameters(self, mock_outlook):
         """Should use sensible defaults (14 days, 100 limit)."""
         mock_outlook.search_outlook = Mock(return_value=[])
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             await call_tool("scan_for_commitments", {})
             
             call_args = mock_outlook.search_outlook.call_args
             assert call_args.kwargs.get('days') == 14
-            assert call_args.kwargs.get('limit') == 100
+            # Implementation fetches limit*2 to account for filtered emails
+            assert call_args.kwargs.get('limit') == 200
     
     @pytest.mark.asyncio
     async def test_returns_count_of_emails(
@@ -278,7 +294,9 @@ class TestScanForCommitments:
             "attachments": [],
         })
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             result = await call_tool("scan_for_commitments", {"days": 7})
             
@@ -299,7 +317,9 @@ class TestMarkScanned:
         """Should add effi:scanned category to email."""
         mock_outlook.set_category = Mock(return_value=True)
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             result = await call_tool("mark_scanned", {"email_id": "sent-001"})
             
@@ -310,7 +330,9 @@ class TestMarkScanned:
         """Should return success response."""
         mock_outlook.set_category = Mock(return_value=True)
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             result = await call_tool("mark_scanned", {"email_id": "sent-001"})
             
@@ -323,7 +345,9 @@ class TestMarkScanned:
         """Should return error if category cannot be set."""
         mock_outlook.set_category = Mock(return_value=False)
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             result = await call_tool("mark_scanned", {"email_id": "invalid-id"})
             
@@ -336,7 +360,9 @@ class TestMarkScanned:
         """Should support marking multiple emails as scanned."""
         mock_outlook.set_category = Mock(return_value=True)
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             result = await call_tool("batch_mark_scanned", {
                 "email_ids": ["sent-001", "sent-002", "sent-003"]
@@ -355,7 +381,9 @@ class TestMarkScanned:
         # First two succeed, third fails
         mock_outlook.set_category = Mock(side_effect=[True, True, False])
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             result = await call_tool("batch_mark_scanned", {
                 "email_ids": ["sent-001", "sent-002", "sent-003"]
@@ -409,7 +437,9 @@ class TestIntegrationScenarios:
         })
         mock_outlook.set_category = Mock(return_value=True)
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             
             # Step 1: Scan for commitments
@@ -432,7 +462,9 @@ class TestIntegrationScenarios:
         all_emails = sent_emails_with_commitments + [already_scanned_email]
         mock_outlook.search_outlook = Mock(return_value=all_emails)
         
-        with patch('effi_mail.tools.client_search.outlook', mock_outlook):
+        with patch('effi_mail.tools.client_search.search', mock_outlook), \
+             patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+             patch('effi_mail.tools.client_search.folders', mock_outlook):
             from effi_mail import call_tool
             
             result = await call_tool("scan_for_commitments", {"days": 7})

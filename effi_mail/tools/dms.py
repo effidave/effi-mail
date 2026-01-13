@@ -4,12 +4,12 @@ import json
 from datetime import datetime, time
 from typing import Optional
 
-from effi_mail.helpers import outlook, format_email_summary, build_response_with_auto_file
+from effi_mail.helpers import dms, format_email_summary, build_response_with_auto_file
 
 
 def list_dms_clients() -> str:
     """List all client folders in DMSforLegal."""
-    clients = outlook.list_dms_clients()
+    clients = dms.list_dms_clients()
     return json.dumps({
         "count": len(clients),
         "clients": clients
@@ -21,7 +21,7 @@ def list_dms_matters(client: str) -> str:
     if not client:
         return json.dumps({"error": "client parameter is required"})
     
-    matters = outlook.list_dms_matters(client)
+    matters = dms.list_dms_matters(client)
     return json.dumps({
         "client": client,
         "count": len(matters),
@@ -49,7 +49,7 @@ def get_dms_emails(
         return json.dumps({"error": "client and matter parameters are required"})
     
     # Fetch limit+1 to detect truncation
-    emails = outlook.get_dms_emails(client, matter, limit=limit + 1)
+    emails = dms.get_dms_emails(client, matter, limit=limit + 1)
     was_truncated = len(emails) > limit
     emails = emails[:limit]
     
@@ -92,7 +92,7 @@ def get_dms_admin_emails(
         return json.dumps({"error": "client and matter parameters are required"})
     
     # Fetch limit+1 to detect truncation
-    emails = outlook.get_dms_admin_emails(client, matter, limit=limit + 1)
+    emails = dms.get_dms_admin_emails(client, matter, limit=limit + 1)
     was_truncated = len(emails) > limit
     emails = emails[:limit]
     
@@ -144,7 +144,7 @@ def search_dms(
     ) if date_to else None
     
     # Fetch limit+1 to detect truncation
-    emails = outlook.search_dms_emails(
+    emails = dms.search_dms_emails(
         client=client,
         matter=matter,
         subject_contains=subject_contains,
@@ -200,7 +200,7 @@ def file_email_to_dms(
         return json.dumps({"success": False, "error": "matter parameter is required"})
     
     # Validate client exists
-    clients = outlook.list_dms_clients()
+    clients = dms.list_dms_clients()
     if client not in clients:
         return json.dumps({
             "success": False,
@@ -208,14 +208,14 @@ def file_email_to_dms(
         })
     
     # Validate matter exists
-    matters = outlook.list_dms_matters(client)
+    matters = dms.list_dms_matters(client)
     if matter not in matters:
         return json.dumps({
             "success": False,
             "error": f"Matter '{matter}' not found for client '{client}'. Available matters: {matters}"
         })
     
-    result = outlook.file_email_to_dms(
+    result = dms.file_email_to_dms(
         email_id=email_id,
         client_name=client,
         matter_name=matter,
@@ -250,7 +250,7 @@ def file_admin_email_to_dms(
         return json.dumps({"success": False, "error": "matter parameter is required"})
     
     # Validate client exists
-    clients = outlook.list_dms_clients()
+    clients = dms.list_dms_clients()
     if client not in clients:
         return json.dumps({
             "success": False,
@@ -258,14 +258,14 @@ def file_admin_email_to_dms(
         })
     
     # Validate matter exists
-    matters = outlook.list_dms_matters(client)
+    matters = dms.list_dms_matters(client)
     if matter not in matters:
         return json.dumps({
             "success": False,
             "error": f"Matter '{matter}' not found for client '{client}'. Available matters: {matters}"
         })
     
-    result = outlook.file_email_to_dms_admin(
+    result = dms.file_email_to_dms_admin(
         email_id=email_id,
         client_name=client,
         matter_name=matter,
@@ -307,7 +307,7 @@ def batch_file_emails_to_dms(
         return json.dumps({"success": False, "error": "matter parameter is required"})
     
     # Validate client exists
-    clients = outlook.list_dms_clients()
+    clients = dms.list_dms_clients()
     if client not in clients:
         return json.dumps({
             "success": False,
@@ -315,14 +315,14 @@ def batch_file_emails_to_dms(
         })
     
     # Validate matter exists
-    matters = outlook.list_dms_matters(client)
+    matters = dms.list_dms_matters(client)
     if matter not in matters:
         return json.dumps({
             "success": False,
             "error": f"Matter '{matter}' not found for client '{client}'. Available matters: {matters}"
         })
     
-    result = outlook.batch_file_emails_to_dms(
+    result = dms.batch_file_emails_to_dms(
         email_ids=email_ids,
         client_name=client,
         matter_name=matter,

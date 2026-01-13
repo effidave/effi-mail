@@ -56,6 +56,9 @@ from effi_mail.tools.cache import (
     reset_cache_flags,
     list_cache_files,
 )
+from effi_mail.tools.inbox_frontmatter import (
+    add_email_frontmatter,
+)
 
 __all__ = [
     # Email retrieval
@@ -104,4 +107,6 @@ __all__ = [
     "get_cache_status",
     "reset_cache_flags",
     "list_cache_files",
+    # Inbox frontmatter
+    "add_email_frontmatter",
 ]

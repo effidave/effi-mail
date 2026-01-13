@@ -50,6 +50,8 @@ from effi_mail.tools import (
     get_cache_status,
     reset_cache_flags,
     list_cache_files,
+    # Inbox frontmatter
+    add_email_frontmatter,
 )
 
 
@@ -110,6 +112,9 @@ mcp.tool()(mark_cache_processed)
 mcp.tool()(get_cache_status)
 mcp.tool()(reset_cache_flags)
 mcp.tool()(list_cache_files)
+
+# Register inbox frontmatter tools
+mcp.tool()(add_email_frontmatter)
 
 
 def run_server():

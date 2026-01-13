@@ -7,7 +7,7 @@ across Inbox, Sent Items, and optionally DMS folders.
 import json
 from typing import Optional
 
-from effi_mail.helpers import outlook, build_response_with_auto_file
+from effi_mail.helpers import retrieval, build_response_with_auto_file
 
 
 def get_email_thread(
@@ -44,7 +44,7 @@ def get_email_thread(
     """
     try:
         # Get source email to extract ConversationID and ConversationTopic
-        source_email = outlook.get_email_full(email_id)
+        source_email = retrieval.get_email_full(email_id)
         
         if not source_email:
             return json.dumps({"error": f"Email not found: {email_id}"})
@@ -64,7 +64,7 @@ def get_email_thread(
         
         # Get all emails in the conversation with limit+1 to detect truncation
         # Note: We use ConversationTopic for filtering (ConversationID not filterable in Outlook)
-        emails = outlook.get_emails_by_conversation_id(
+        emails = retrieval.get_emails_by_conversation_id(
             conversation_id=conversation_id,
             conversation_topic=conversation_topic,
             include_sent=include_sent,
@@ -145,7 +145,7 @@ def get_thread_locations(email_id: str) -> str:
     """
     try:
         # Get source email
-        source_email = outlook.get_email_full(email_id)
+        source_email = retrieval.get_email_full(email_id)
         
         if not source_email:
             return json.dumps({"error": f"Email not found: {email_id}"})
@@ -164,7 +164,7 @@ def get_thread_locations(email_id: str) -> str:
             })
         
         # Get all emails in the conversation
-        emails = outlook.get_emails_by_conversation_id(
+        emails = retrieval.get_emails_by_conversation_id(
             conversation_id=conversation_id,
             conversation_topic=conversation_topic,
             include_sent=True,

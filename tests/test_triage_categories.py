@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import Mock, MagicMock, patch
 from datetime import datetime, timedelta
 
-from outlook_client import OutlookClient
+from outlook_client import TriageClient, RetrievalClient
 from models import Email
 
 
@@ -38,8 +38,8 @@ def mock_namespace(mock_outlook_message):
 
 @pytest.fixture
 def outlook_client(mock_namespace):
-    """Create an OutlookClient with mocked COM connection."""
-    client = OutlookClient()
+    """Create a TriageClient with mocked COM connection."""
+    client = TriageClient()
     client._namespace = mock_namespace
     client._outlook = Mock()
     return client
@@ -54,11 +54,11 @@ class TestTriageCategoryConstants:
     
     def test_triage_category_prefix(self):
         """Triage categories should use effi: prefix to avoid conflicts."""
-        assert OutlookClient.TRIAGE_CATEGORY_PREFIX == "effi:"
+        assert TriageClient.TRIAGE_CATEGORY_PREFIX == "effi:"
     
     def test_triage_categories_defined(self):
         """All triage statuses should have corresponding categories."""
-        categories = OutlookClient.TRIAGE_CATEGORIES
+        categories = TriageClient.TRIAGE_CATEGORIES
         
         assert "action" in categories
         assert "waiting" in categories
@@ -67,7 +67,7 @@ class TestTriageCategoryConstants:
     
     def test_triage_category_values(self):
         """Triage category values should use effi: prefix."""
-        categories = OutlookClient.TRIAGE_CATEGORIES
+        categories = TriageClient.TRIAGE_CATEGORIES
         
         assert categories["action"] == "effi:action"
         assert categories["waiting"] == "effi:waiting"
@@ -326,7 +326,16 @@ class TestBatchSetTriageStatus:
 class TestGetPendingEmails:
     """Test retrieving pending (un-triaged) emails."""
     
-    def test_get_pending_emails_excludes_triaged(self, outlook_client, mock_namespace):
+    @pytest.fixture
+    def retrieval_client(self, mock_namespace):
+        """Create a RetrievalClient for pending emails tests."""
+        from outlook_client import RetrievalClient
+        client = RetrievalClient()
+        client._outlook = Mock()
+        client._namespace = mock_namespace
+        return client
+    
+    def test_get_pending_emails_excludes_triaged(self, retrieval_client, mock_namespace):
         """Should exclude emails with effi: categories."""
         folder = Mock()
         folder.Name = "Inbox"
@@ -339,12 +348,12 @@ class TestGetPendingEmails:
         
         mock_namespace.GetDefaultFolder = Mock(return_value=folder)
         
-        result = outlook_client.get_pending_emails(days=7, limit=100)
+        result = retrieval_client.get_pending_emails(days=7, limit=100)
         
         # Should only include emails without effi: categories
         assert result["total"] == 2
     
-    def test_get_pending_emails_groups_by_domain(self, outlook_client, mock_namespace):
+    def test_get_pending_emails_groups_by_domain(self, retrieval_client, mock_namespace):
         """Should group emails by sender domain."""
         folder = Mock()
         folder.Name = "Inbox"
@@ -356,7 +365,7 @@ class TestGetPendingEmails:
         
         mock_namespace.GetDefaultFolder = Mock(return_value=folder)
         
-        result = outlook_client.get_pending_emails(days=7, group_by_domain=True)
+        result = retrieval_client.get_pending_emails(days=7, group_by_domain=True)
         
         assert "domains" in result
         # Should have 2 domains
@@ -671,9 +680,9 @@ class TestDomainCategories:
 class TestNoDatabaseDependency:
     """Verify that triage operations don't use database."""
     
-    def test_outlook_client_has_no_db_attribute(self):
-        """OutlookClient should not have db attribute."""
-        client = OutlookClient()
+    def test_triage_client_has_no_db_attribute(self):
+        """TriageClient should not have db attribute."""
+        client = TriageClient()
         assert not hasattr(client, 'db') or client.db is None or not hasattr(client, 'db')
     
     def test_set_triage_status_no_db_call(self, outlook_client, mock_outlook_message):
@@ -688,12 +697,12 @@ class TestNoDatabaseDependency:
     def test_mcp_server_uses_outlook_for_triage(self):
         """MCP server should use outlook methods for triage, not db."""
         # Check the triage tool implementation
-        from effi_mail.tools import triage
+        from effi_mail.tools import triage as triage_module
         import inspect
-        source_code = inspect.getsource(triage)
+        source_code = inspect.getsource(triage_module)
         
         # Should not have db.update_email_triage calls
         assert "db.update_email_triage" not in source_code
         
-        # Should use outlook.set_triage_status
-        assert "outlook.set_triage_status" in source_code
+        # Should use triage.set_triage_status (via the triage client)
+        assert "triage.set_triage_status" in source_code

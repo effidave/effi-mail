@@ -4,7 +4,7 @@ import json
 from datetime import datetime, time
 from typing import Optional
 
-from effi_mail.helpers import outlook, format_email_summary, build_response_with_auto_file
+from effi_mail.helpers import search, retrieval, folders, format_email_summary, build_response_with_auto_file
 from effi_work_client import get_client_identifiers_from_effi_work
 
 
@@ -44,7 +44,7 @@ async def get_emails_by_client(
         })
     
     # Search Outlook with limit+1 to detect truncation
-    emails = outlook.search_outlook_by_identifiers(
+    emails = search.search_outlook_by_identifiers(
         domains=identifiers["domains"],
         contact_emails=identifiers.get("contact_emails", []),
         days=days,
@@ -107,7 +107,7 @@ def search_outlook_direct(
     ) if date_to else None
     
     # Search with limit+1 to detect truncation
-    emails = outlook.search_outlook(
+    emails = search.search_outlook(
         sender_domain=sender_domain,
         sender_email=sender_email,
         recipient_domain=recipient_domain,
@@ -179,7 +179,7 @@ def scan_for_commitments(
         JSON with emails including full body content for commitment scanning
     """
     # Get sent emails - fetch more to account for filtering
-    emails = outlook.search_outlook(
+    emails = search.search_outlook(
         folder="Sent Items",
         days=days,
         limit=limit * 2,  # Fetch extra since we filter out scanned
@@ -192,7 +192,7 @@ def scan_for_commitments(
     result_emails = []
     for email in unscanned:
         try:
-            full_email = outlook.get_email_full(email.id)
+            full_email = retrieval.get_email_full(email.id)
             result_emails.append({
                 "id": email.id,
                 "subject": full_email.get("subject", email.subject),
@@ -242,7 +242,7 @@ def mark_scanned(email_id: str) -> str:
     Returns:
         JSON with success status
     """
-    success = outlook.set_category(email_id, SCANNED_CATEGORY)
+    success = folders.set_category(email_id, SCANNED_CATEGORY)
     
     if success:
         return json.dumps({
@@ -272,7 +272,7 @@ def batch_mark_scanned(email_ids: list[str]) -> str:
     failed_ids = []
     
     for email_id in email_ids:
-        success = outlook.set_category(email_id, SCANNED_CATEGORY)
+        success = folders.set_category(email_id, SCANNED_CATEGORY)
         if success:
             marked_count += 1
         else:

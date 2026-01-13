@@ -3,7 +3,7 @@
 import json
 from typing import Optional
 
-from effi_mail.helpers import outlook, build_response_with_auto_file
+from effi_mail.helpers import retrieval, build_response_with_auto_file
 from domain_categories import (
     get_domain_category,
     set_domain_category,
@@ -34,7 +34,7 @@ def get_uncategorized_domains(
         auto_file_threshold: Auto-file results above this count (default 20)
     """
     # Scan ALL emails in date range for uncategorized domains (no limit)
-    result = outlook.get_domain_counts(days=days, limit=None, pending_only=False)
+    result = retrieval.get_domain_counts(days=days, limit=None, pending_only=False)
     
     uncategorized = []
     for domain_data in result.get("domains", []):

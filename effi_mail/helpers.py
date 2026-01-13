@@ -5,11 +5,26 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
-from outlook_client import OutlookClient
+
+from outlook_client import (
+    DMSClient,
+    TriageClient,
+    RetrievalClient,
+    SearchClient,
+    FoldersClient,
+)
 
 
-# Shared Outlook client instance
-outlook = OutlookClient()
+# Shared Outlook client instances (one per concern)
+# Each client manages its own COM connection
+triage = TriageClient()
+retrieval = RetrievalClient()
+search = SearchClient()
+dms = DMSClient()
+folders = FoldersClient()
+
+# Legacy alias for backwards compatibility during transition
+outlook = retrieval
 
 # Cache directory for large responses
 CACHE_DIR = Path.home() / ".effi" / "cache"
@@ -182,9 +197,9 @@ def format_email_summary(email: Any, include_preview: bool = False, include_reci
         "direction": email.direction,
     }
     # Get triage status from Outlook categories
-    triage = outlook.get_triage_status(email.id)
-    if triage:
-        result["triage_status"] = triage
+    triage_status = triage.get_triage_status(email.id)
+    if triage_status:
+        result["triage_status"] = triage_status
     if include_preview:
         result["preview"] = truncate_text(email.body_preview, 200)
     if include_recipients:

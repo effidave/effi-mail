@@ -3,7 +3,7 @@
 import json
 from typing import Optional
 
-from effi_mail.helpers import outlook, format_email_summary, truncate_text, build_response_with_auto_file
+from effi_mail.helpers import retrieval, search, format_email_summary, truncate_text, build_response_with_auto_file
 from domain_categories import get_domain_category
 
 
@@ -24,7 +24,7 @@ def get_pending_emails(
     ⚠️ Results are LIMITED. Check 'results_truncated' in response to determine if more records exist.
     """
     # Query Outlook with limit+1 to detect truncation
-    result = outlook.get_pending_emails(days=days, limit=limit + 1, group_by_domain=True)
+    result = retrieval.get_pending_emails(days=days, limit=limit + 1, group_by_domain=True)
     
     # Check if results were truncated
     total_available = result.get("total", 0)
@@ -119,7 +119,7 @@ def get_inbox_emails_by_domain(
     ⚠️ Results are LIMITED. Check 'results_truncated' in response to determine if more records exist.
     """
     # Search Outlook with limit+1 to detect truncation
-    emails = outlook.search_outlook(sender_domain=domain, limit=limit + 1)
+    emails = search.search_outlook(sender_domain=domain, limit=limit + 1)
     was_truncated = len(emails) > limit
     emails = emails[:limit]
     
@@ -159,10 +159,10 @@ def get_sent_emails_by_domain(
     ⚠️ Results are LIMITED. Check 'results_truncated' in response to determine if more records exist.
     """
     # Ensure recipient domains are set on recent sent items
-    outlook._set_recipient_domains()
+    retrieval._set_recipient_domains()
     
     # Search Outlook Sent Items with limit+1 to detect truncation
-    emails = outlook.search_outlook(recipient_domain=domain, folder="Sent Items", days=days, limit=limit + 1)
+    emails = search.search_outlook(recipient_domain=domain, folder="Sent Items", days=days, limit=limit + 1)
     was_truncated = len(emails) > limit
     emails = emails[:limit]
     
@@ -193,7 +193,7 @@ def get_email_by_id(
 ) -> str:
     """Get full email by EntryID or internet_message_id (auto-detected)."""
     # Get email directly from Outlook
-    full_email = outlook.get_email_full(email_id)
+    full_email = retrieval.get_email_full(email_id)
     
     if full_email:
         result = full_email.copy()
@@ -214,8 +214,44 @@ def download_attachment(
     attachment_name: str,
     save_path: Optional[str] = None
 ) -> str:
-    """Download attachment to save_path or ./attachments/{domain}/{date}/{filename}."""
-    result = outlook.download_attachment(
+    """Download attachment to save_path or ./attachments/{domain}/{date}/{filename}.
+    
+    Filename is automatically suffixed with email timestamp (__YYYY-MM-DD-HHMM) before the extension
+    for chronological context. E.g., "contract.pdf" becomes "contract__2026-01-10-1708.pdf"
+    """
+    from datetime import datetime
+    from pathlib import Path
+    
+    # Get email timestamp for filename suffix
+    full_email = retrieval.get_email_full(email_id)
+    timestamp_suffix = ""
+    if full_email:
+        received = full_email.get("received_time", "")
+        if received:
+            try:
+                if isinstance(received, str):
+                    dt = datetime.fromisoformat(received.replace("Z", "+00:00"))
+                else:
+                    dt = received
+                timestamp_suffix = "__" + dt.strftime("%Y-%m-%d-%H%M")
+            except (ValueError, AttributeError):
+                pass
+    
+    # Modify save_path to include timestamp suffix in filename (before extension)
+    if save_path and timestamp_suffix:
+        path = Path(save_path)
+        
+        if path.suffix:  # Has a file extension - treat as full file path
+            # Insert timestamp before extension: contract.pdf -> contract__2026-01-10-1708.pdf
+            new_filename = path.stem + timestamp_suffix + path.suffix
+            save_path = str(path.parent / new_filename)
+        else:
+            # Treat as directory - add timestamped filename
+            att_path = Path(attachment_name)
+            new_filename = att_path.stem + timestamp_suffix + att_path.suffix
+            save_path = str(path / new_filename)
+    
+    result = retrieval.download_attachment(
         email_id=email_id,
         attachment_name=attachment_name,
         save_path=save_path
@@ -239,7 +275,7 @@ def search_inbox_by_subject(
     
     ⚠️ Results are LIMITED. Check 'results_truncated' in response to determine if more records exist.
     """
-    emails = outlook.search_outlook(
+    emails = search.search_outlook(
         subject_contains=subject_starts_with,
         folder="Inbox",
         days=days,

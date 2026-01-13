@@ -21,13 +21,22 @@ from effi_mail import call_tool
 
 @contextmanager
 def patch_outlook(mock_outlook):
-    """Patch outlook in all tool modules."""
-    with patch('effi_mail.helpers.outlook', mock_outlook), \
-         patch('effi_mail.tools.triage.outlook', mock_outlook), \
-         patch('effi_mail.tools.email_retrieval.outlook', mock_outlook), \
-         patch('effi_mail.tools.domain_categories.outlook', mock_outlook), \
-         patch('effi_mail.tools.client_search.outlook', mock_outlook), \
-         patch('effi_mail.tools.dms.outlook', mock_outlook):
+    """Patch outlook clients in all tool modules."""
+    with patch('effi_mail.helpers.triage', mock_outlook), \
+         patch('effi_mail.helpers.retrieval', mock_outlook), \
+         patch('effi_mail.helpers.search', mock_outlook), \
+         patch('effi_mail.helpers.dms', mock_outlook), \
+         patch('effi_mail.helpers.folders', mock_outlook), \
+         patch('effi_mail.tools.triage.triage', mock_outlook), \
+         patch('effi_mail.tools.triage.folders', mock_outlook), \
+         patch('effi_mail.tools.email_retrieval.retrieval', mock_outlook), \
+         patch('effi_mail.tools.email_retrieval.search', mock_outlook), \
+         patch('effi_mail.tools.domain_categories.retrieval', mock_outlook), \
+         patch('effi_mail.tools.client_search.search', mock_outlook), \
+         patch('effi_mail.tools.client_search.retrieval', mock_outlook), \
+         patch('effi_mail.tools.client_search.folders', mock_outlook), \
+         patch('effi_mail.tools.dms.dms', mock_outlook), \
+         patch('effi_mail.tools.thread.retrieval', mock_outlook):
         yield
 
 
@@ -189,13 +198,13 @@ def mock_outlook_for_filing(mock_dms_folder_structure, mock_message):
 # ============================================================================
 
 class TestOutlookClientFileEmailToDMS:
-    """Unit tests for OutlookClient.file_email_to_dms method."""
+    """Unit tests for DMSClient.file_email_to_dms method."""
     
     def test_file_email_copies_to_dms_folder(self, mock_dms_folder_structure, mock_message):
         """Filing should copy email to DMS Emails folder."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         client._namespace.GetItemFromID = Mock(return_value=mock_message)
@@ -229,9 +238,9 @@ class TestOutlookClientFileEmailToDMS:
     
     def test_file_email_adds_filed_category(self, mock_dms_folder_structure, mock_message):
         """Filing should add 'Filed' category to original email."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         client._namespace.GetItemFromID = Mock(return_value=mock_message)
@@ -257,9 +266,9 @@ class TestOutlookClientFileEmailToDMS:
     
     def test_file_email_marks_as_processed(self, mock_dms_folder_structure, mock_message):
         """Filing should mark original email as effi:processed."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         client._namespace.GetItemFromID = Mock(return_value=mock_message)
@@ -285,9 +294,9 @@ class TestOutlookClientFileEmailToDMS:
     
     def test_file_email_error_when_client_not_found(self, mock_dms_folder_structure, mock_message):
         """Filing should return error if client folder doesn't exist."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         client._namespace.GetItemFromID = Mock(return_value=mock_message)
@@ -312,9 +321,9 @@ class TestOutlookClientFileEmailToDMS:
     
     def test_file_email_error_when_matter_not_found(self, mock_dms_folder_structure, mock_message):
         """Filing should return error if matter folder doesn't exist."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         client._namespace.GetItemFromID = Mock(return_value=mock_message)
@@ -339,9 +348,9 @@ class TestOutlookClientFileEmailToDMS:
     
     def test_file_email_error_when_emails_folder_missing(self, mock_dms_folder_structure, mock_message):
         """Filing should return error if Emails subfolder doesn't exist."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         client._namespace.GetItemFromID = Mock(return_value=mock_message)
@@ -366,9 +375,9 @@ class TestOutlookClientFileEmailToDMS:
     
     def test_file_email_error_when_email_not_found(self, mock_dms_folder_structure):
         """Filing should return error if email_id is invalid."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         client._namespace.GetItemFromID = Mock(side_effect=Exception("Item not found"))
@@ -397,11 +406,11 @@ class TestOutlookClientFileEmailToDMS:
 # ============================================================================
 
 class TestOutlookClientBatchFileEmailsToDMS:
-    """Unit tests for OutlookClient.batch_file_emails_to_dms method."""
+    """Unit tests for DMSClient.batch_file_emails_to_dms method."""
     
     def test_batch_file_multiple_emails(self, mock_dms_folder_structure):
         """Batch filing should file multiple emails to same matter."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
         # Create multiple mock messages
         messages = []
@@ -422,7 +431,7 @@ class TestOutlookClientBatchFileEmailsToDMS:
             
             messages.append(msg)
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         client._namespace.GetItemFromID = Mock(side_effect=messages)
@@ -449,9 +458,9 @@ class TestOutlookClientBatchFileEmailsToDMS:
     
     def test_batch_file_validates_folder_once(self, mock_dms_folder_structure):
         """Batch filing should validate DMS folder exists once upfront."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         
@@ -478,7 +487,7 @@ class TestOutlookClientBatchFileEmailsToDMS:
     
     def test_batch_file_continues_on_single_email_error(self, mock_dms_folder_structure):
         """Batch filing should continue processing if one email fails."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
         # First message succeeds, second fails, third succeeds
         msg1 = Mock()
@@ -515,7 +524,7 @@ class TestOutlookClientBatchFileEmailsToDMS:
             elif email_id == "orig-3":
                 return msg3
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         client._namespace.GetItemFromID = Mock(side_effect=get_item)
@@ -543,9 +552,9 @@ class TestOutlookClientBatchFileEmailsToDMS:
     
     def test_batch_file_empty_list(self, mock_dms_folder_structure):
         """Batch filing with empty list should return appropriate response."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         client._outlook = Mock()
         client._namespace = Mock()
         
@@ -746,9 +755,9 @@ class TestFileEmailIntegration:
     @pytest.mark.skip(reason="Requires live Outlook connection")
     def test_live_file_email_to_dms(self):
         """Test actual email filing to DMS."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         
         # Get a recent email from Inbox
         inbox = client._namespace.GetDefaultFolder(6)  # olFolderInbox
@@ -763,9 +772,9 @@ class TestFileEmailIntegration:
     @pytest.mark.skip(reason="Requires live Outlook connection")
     def test_live_dms_folder_structure(self):
         """Verify DMS folder structure exists."""
-        from outlook_client import OutlookClient
+        from outlook_client import DMSClient
         
-        client = OutlookClient()
+        client = DMSClient()
         clients = client.list_dms_clients()
         
         print(f"DMS Clients: {clients}")
