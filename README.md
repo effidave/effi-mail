@@ -4,6 +4,7 @@ MCP server for Outlook email management with triage workflow, built with [FastMC
 
 ## Features
 
+- **Email Ingestion**: Deterministic script to fetch and convert emails to markdown before triaging
 - **Direct Outlook Access**: Fetch emails from Outlook via Windows COM
 - **Triage via Categories**: Triage status stored as Outlook categories (effi:action, effi:waiting, effi:processed, effi:archived)
 - **Domain Categorization**: Classify sender domains as Client, Internal, Marketing, Personal, or Spam (stored in domain_categories.json)
@@ -202,6 +203,18 @@ Auto-filed results are stored with metadata and tracking flags:
 
 ## Workflow
 
+### Email Ingestion (Pre-Triage)
+
+Before triaging, use the ingestion script to fetch and convert emails:
+
+```bash
+python scripts/ingest_emails.py --folder Inbox --limit 50
+```
+
+This saves emails to `_inbox/` as markdown with YAML frontmatter. See [Ingestion README](effi_mail/ingestion/README.md) for details.
+
+### Email Triage
+
 1. Use `get_pending_emails` to see un-triaged emails grouped by domain
 2. Use `get_uncategorized_domains` to categorize new sender domains
 3. Archive marketing emails in bulk with `batch_archive_domain`
@@ -217,12 +230,20 @@ effi_mail/
 ├── main.py               # FastMCP server setup & tool registration
 ├── config.py             # Transport configuration
 ├── helpers.py            # Shared utilities (outlook client, formatters)
+├── ingestion/            # Email ingestion module
+│   ├── ingest.py         # Main ingestion logic
+│   ├── storage.py        # File operations and seen ID tracking
+│   ├── thread_parser.py  # Thread content extraction
+│   └── README.md         # Ingestion documentation
 └── tools/
     ├── email_retrieval.py    # Email fetching tools
     ├── triage.py             # Triage status tools
     ├── domain_categories.py  # Domain categorization tools
     ├── client_search.py      # Client search tools
     └── dms.py                # DMSforLegal tools
+
+scripts/
+└── ingest_emails.py      # CLI script for email ingestion
 ```
 
 ## Development
