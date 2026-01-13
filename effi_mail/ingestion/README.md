@@ -15,16 +15,13 @@ The ingestion system:
 
 ## Installation
 
-Install dependencies:
-
-```bash
-pip install python-frontmatter
-```
+Install this module as part of the main project using the standard installation method for the repository (e.g., via `pip install .` or `pip install -e .` for development from the project root). This will automatically install all required dependencies declared in `pyproject.toml`, including `python-frontmatter`.
 
 The script requires:
 - Python 3.10+
 - Windows OS (for Outlook COM access)
-- `pywin32` package (Windows only)
+- `pywin32` package (Windows only, installed automatically)
+- `python-frontmatter` (installed automatically via project dependencies)
 
 ## Usage
 

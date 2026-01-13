@@ -208,6 +208,10 @@ Auto-filed results are stored with metadata and tracking flags:
 Before triaging, use the ingestion script to fetch and convert emails:
 
 ```bash
+# After installation, use the entry point command:
+ingest-emails --folder Inbox --limit 50
+
+# Or run directly during development:
 python scripts/ingest_emails.py --folder Inbox --limit 50
 ```
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# Note: This script requires Outlook via win32com and therefore
+# requires a Windows environment, despite the Unix-style shebang above.
 """Email ingestion script.
 
 Deterministic script to fetch and convert emails from Outlook to markdown

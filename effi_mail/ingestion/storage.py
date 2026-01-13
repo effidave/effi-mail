@@ -41,10 +41,23 @@ def save_seen_ids(inbox_path: Path, seen_ids: Set[str]) -> None:
     seen_file = inbox_path / "_seen.json"
     temp_file = seen_file.with_suffix(".tmp")
     
-    data = {"seen_ids": sorted(list(seen_ids))}
-    temp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    temp_file.rename(seen_file)
-    logger.debug(f"Saved {len(seen_ids)} seen IDs")
+    try:
+        data = {"seen_ids": sorted(list(seen_ids))}
+        temp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temp_file.rename(seen_file)
+        logger.debug(f"Saved {len(seen_ids)} seen IDs")
+    except Exception as e:
+        logger.error(f"Failed to save seen IDs to {seen_file}: {e}")
+        raise
+    finally:
+        # Clean up temp file if it still exists (e.g., if rename failed)
+        if temp_file.exists():
+            try:
+                temp_file.unlink()
+            except Exception as cleanup_error:
+                logger.warning(
+                    f"Failed to remove temporary file {temp_file}: {cleanup_error}"
+                )
 
 
 def save_attachments(msg, attachments_dir: Path) -> list[dict]:

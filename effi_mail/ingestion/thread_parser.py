@@ -11,10 +11,12 @@ def extract_new_content(body: str) -> Tuple[str, str]:
     """Extract new content from email, separating from quoted thread.
     
     Args:
-        body: Full email body text
+        body: Full email body text. May be ``None`` or an empty string,
+            in which case no content is extracted.
         
     Returns:
-        Tuple of (new_content, quoted_remainder)
+        Tuple of (new_content, quoted_remainder). For ``None`` or empty
+        input, both values will be empty strings (``"", "``).
     """
     if not body:
         return "", ""

@@ -112,13 +112,16 @@ def build_email_markdown(
         metadata["attachments"] = attachments
     
     # Build body content
-    body_parts = ["# New Content\n", new_content]
+    body_parts = ["# New Content", new_content]
     
     if quoted_content:
-        body_parts.append("\n\n<details>")
-        body_parts.append("<summary>Previous messages in thread</summary>\n")
+        # Add a blank line before details block for readability
+        body_parts.append("")
+        body_parts.append("<details>")
+        body_parts.append("<summary>Previous messages in thread</summary>")
+        body_parts.append("")
         body_parts.append(quoted_content)
-        body_parts.append("\n</details>")
+        body_parts.append("</details>")
     
     body = "\n".join(body_parts)
     
@@ -158,10 +161,16 @@ def save_email(msg, inbox_path: Path) -> Path:
     # Save attachments first
     attachments = save_attachments(msg, attachments_dir)
     
-    # Extract addresses
+    # Extract addresses - guard against missing Recipients
     from_address = msg.SenderEmailAddress
-    to_addresses = [r.Address for r in msg.Recipients if r.Type == 1]  # 1 = To
-    cc_addresses = [r.Address for r in msg.Recipients if r.Type == 2]  # 2 = CC
+    try:
+        to_addresses = [r.Address for r in msg.Recipients if r.Type == 1]  # 1 = To
+        cc_addresses = [r.Address for r in msg.Recipients if r.Type == 2]  # 2 = CC
+    except (AttributeError, TypeError):
+        # Handle cases where Recipients is None or doesn't support iteration
+        logger.warning(f"Failed to extract recipients from email {message_id}")
+        to_addresses = []
+        cc_addresses = []
     
     # Extract thread info
     thread_id = getattr(msg, "ConversationID", None)
@@ -199,11 +208,17 @@ def ingest_new_emails(
     Args:
         inbox_path: Path to local _inbox folder
         folder: Outlook folder to poll - "Inbox", "Sent Items", or custom path
-        limit: Maximum emails to process per run
+        limit: Maximum emails to process per run (must be positive)
     
     Returns:
         List of paths to newly saved email files
+        
+    Raises:
+        ValueError: If limit is not a positive integer
     """
+    if limit <= 0:
+        raise ValueError(f"limit must be a positive integer, got {limit}")
+    
     inbox_path.mkdir(parents=True, exist_ok=True)
     
     # Load already-seen message IDs
@@ -216,6 +231,8 @@ def ingest_new_emails(
     
     saved_paths = []
     processed = 0
+    skipped_already_seen = 0
+    skipped_errors = []
     
     # Iterate through folder items (most recent first)
     items = outlook_folder.Items
@@ -231,6 +248,7 @@ def ingest_new_emails(
             message_id = msg.EntryID
             
             if message_id in seen_ids:
+                skipped_already_seen += 1
                 continue
             
             # Save immediately
@@ -244,11 +262,24 @@ def ingest_new_emails(
             processed += 1
             
         except Exception as e:
-            logger.error(f"Failed to save email: {e}")
+            subject = getattr(msg, 'Subject', 'Unknown')
+            error_info = {
+                'subject': subject,
+                'error': str(e)
+            }
+            skipped_errors.append(error_info)
+            logger.error(f"Failed to save email '{subject}': {e}")
             continue
     
     # Persist seen IDs
     save_seen_ids(inbox_path, seen_ids)
     
+    # Log summary
     logger.info(f"Ingestion complete: {len(saved_paths)} new emails saved")
+    if skipped_already_seen > 0:
+        logger.info(f"Skipped {skipped_already_seen} emails (already processed)")
+    if skipped_errors:
+        logger.warning(f"Failed to process {len(skipped_errors)} emails due to errors:")
+        for error_info in skipped_errors:
+            logger.warning(f"  - '{error_info['subject']}': {error_info['error']}")
     return saved_paths

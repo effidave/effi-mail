@@ -12,7 +12,6 @@ import pytest
 import json
 import tempfile
 import sys
-import os
 from datetime import datetime
 from pathlib import Path
 import importlib.util
